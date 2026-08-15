@@ -1,0 +1,28 @@
+{
+    "name": "droidtaskflow-default",
+    "version": "1.0.0",
+    "description": "Default Material Design 3 theme. Override tokens to re-skin the entire UI.",
+    "tokens": {
+        "primary": "#0061a4",
+        "secondary": "#6750a4",
+        "tertiary": "#984061",
+        "background": "#fbf8fd"
+    },
+    "wire_ports": {
+        "strategy": "golden-angle-spaced",
+        "lightness": [0.55, 0.70],
+        "chroma": [0.16, 0.22],
+        "default_unconnected": "oklch(0.62 0.02 270)"
+    },
+    "shape": {
+        "node": "12px",
+        "task": "12px",
+        "field": "4px"
+    },
+    "type_scale": {
+        "node_title": "16px",
+        "task_title": "13px",
+        "wire_label": "11px",
+        "field_label": "10px"
+    }
+}

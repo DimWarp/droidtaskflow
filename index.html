@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DroidTaskFlow</title>
+    <link rel="stylesheet" href="/src/styles/main.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+    <script src="/pyodide/pyodide.js"></script>
+</head>
+<body>
+    <div class="app-shell console-pane--collapsed">
+        <header class="top-bar">
+            <button class="icon-btn" id="btnUndo" data-tooltip="tooltip.undo" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+            </button>
+            <button class="icon-btn" id="btnRedo" data-tooltip="tooltip.redo" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+            </button>
+            <h1 class="top-bar__title"><strong>DroidTaskFlow</strong></h1>
+            <button class="icon-btn" id="btnOpenDir" data-tooltip="tooltip.openDir"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></button>
+            <button class="icon-btn" id="btnExport" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></button>
+            <button class="icon-btn" id="btnLang" data-tooltip="tooltip.lang">EN</button>
+            <button class="icon-btn" id="btnDarkMode" data-tooltip="tooltip.theme">
+                <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button class="icon-btn" id="btnRun" data-tooltip="tooltip.run" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+            </button>
+            <button class="icon-btn" id="btnSave" data-tooltip="tooltip.save" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            </button>
+            <button class="icon-btn" id="btnCloseProject" data-tooltip="tooltip.close" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </header>
+        <aside class="sidebar-wrap">
+            <div id="sidebar" class="sidebar">
+                <div class="sidebar__section" style="flex: 0.3;">
+                    <div class="sidebar__section-title">
+                        <span data-i18n="sidebar.backendsDevices">后端与设备</span>
+                        <div class="sidebar__title-actions">
+                            <button id="btnAddBackend" class="sidebar__title-btn" data-tooltip="tooltip.addBackend">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="sidebar__section-body" id="backendListBody">
+                        <div class="sidebar__stub-hint" id="backendStubHint" data-i18n="sidebar.backendStub">添加后端以连接</div>
+                        <ul class="backend-list" id="backendList"></ul>
+                        <ul class="backend-list" id="deviceList" hidden></ul>
+                    </div>
+                </div>
+                <div class="sidebar__section" style="flex: 0.3;">
+                    <div class="sidebar__section-title">
+                        <span data-i18n="sidebar.projects">工程</span>
+                        <div class="sidebar__title-actions">
+                            <button id="btnNewProject" class="sidebar__title-btn" data-tooltip="tooltip.newProject">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            </button>
+                            <button id="btnImport" class="sidebar__title-btn" data-tooltip="tooltip.importProject">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="sidebar__section-body">
+                        <div class="sidebar__placeholder" data-i18n="sidebar.placeholderChooseDir">选择工作目录以启用项目列表</div>
+                    </div>
+                </div>
+                <div class="sidebar__section" style="flex: 0.4;">
+                    <div class="sidebar__section-title">
+                        <span data-i18n="sidebar.automation">自动化</span>
+                        <div class="sidebar__title-actions">
+                            <button id="btnAddAutomationTask" class="sidebar__title-btn" data-tooltip="tooltip.addAutomation">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="sidebar__section-body">
+                        <div id="automationTaskList" class="automation__list"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="console-handle-row">
+                <button class="console-handle" id="consoleToggle" disabled>
+                    <svg class="console-handle__chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                    <span class="console-handle__label" data-i18n="console.label">输出</span>
+                </button>
+                <button class="console-handle__clear" id="consoleClear" data-i18n="console.clear">清空</button>
+            </div>
+        </aside>
+        <div class="main-area" id="mainArea">
+            <div id="projectOverlay" class="project-overlay">
+                <span class="project-overlay__text" data-i18n="project.overlayText">请新建或打开一个工程</span>
+            </div>
+            <div class="canvas">
+                <div id="canvasToolbar" class="canvas-toolbar">
+                    <button id="sidebarToggle" class="sidebar__toggle">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+                    </button>
+                    <div id="globalVarsBar" class="global-vars-bar">
+                        <span class="gv__label" data-i18n="gv.label">全局变量</span>
+                        <div id="gvItems" class="gv__items"></div>
+                        <button id="gvAdd" class="gv__add">+</button>
+                    </div>
+                    <button id="btnAddNode" class="canvas-tool-btn" data-i18n="canvas.addNode">添加节点</button>
+                    <button id="btnAddGroup" class="canvas-tool-btn" disabled data-i18n="canvas.addGroup">添加操作组</button>
+                    <button id="btnAddGoto" class="canvas-tool-btn" data-i18n="canvas.addGoto">添加Goto节点</button>
+                    <button id="codePreviewToggle" class="code-preview__toggle" aria-expanded="false">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+                    </button>
+                </div>
+                <div id="canvasToolbarRow2" class="canvas-toolbar canvas-toolbar--row2">
+                    <div id="devicePreview" class="device-preview device-preview--collapsed">
+                        <div class="device-preview__header" id="devicePreviewHeader">
+                            <span class="device-preview__label" data-i18n="device.label">设备预览</span>
+                            <span class="device-preview__arrow">▲</span>
+                            <div class="device-preview__resize"></div>
+                        </div>
+                        <div class="device-preview__body" id="devicePreviewBody">
+                            <div class="device-preview__buttons">
+                                <button id="btnDeviceScreenshot" class="dp-btn" disabled data-i18n="device.screenshot">截图</button>
+                                <button id="btnDeviceOpenImage" class="dp-btn" data-i18n="device.upload">上传</button>
+                                <button id="btnDeviceClear" class="dp-btn" disabled data-i18n="device.clear">清空</button>
+                                <div class="device-preview__tools">
+                                    <button id="btnDeviceTools" class="dp-btn"><span data-i18n="device.tools">工具</span>▾</button>
+                                    <div id="deviceToolsMenu" class="device-tools-menu" hidden>
+                                        <button class="device-tools-menu__item" data-tool="crop-copy" data-tooltip="tooltip.cropCopy" data-i18n="device.cropCopy" disabled>裁剪复制</button>
+                                        <button class="device-tools-menu__item" data-tool="image-match" data-tooltip="tooltip.imageMatch" data-i18n="device.imageMatch" disabled>图像匹配</button>
+                                        <button id="btnDeviceOCR" class="device-tools-menu__item" disabled data-tooltip="tooltip.ocr">OCR</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="device-preview__stage device-preview__stage--empty" id="devicePreviewStage">
+                                <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
+                            </div>
+                            <div class="device-preview__infobar" id="devicePreviewInfobar">
+                                <div class="device-preview__infobar-hover" id="devicePreviewInfobarHover">
+                                    <span data-type="x">x: —</span>
+                                    <span data-type="y">y: —</span>
+                                    <span data-type="hex">HEX: —</span>
+                                </div>
+                                <div class="device-preview__infobar-pick" id="devicePreviewInfobarPick">
+                                    <span data-type="x">x: —</span>
+                                    <span data-type="y">y: —</span>
+                                    <span data-type="hex">HEX: —</span>
+                                </div>
+                                <div class="device-preview__infobar-app" id="devicePreviewInfobarApp">
+                                    <span data-type="app">app: —</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="taskPalette" class="task-palette task-palette--collapsed">
+                        <div class="task-palette__header">
+                            <span class="task-palette__label" data-i18n="palette.label">任务卡片</span>
+                            <span class="task-palette__arrow">▲</span>
+                        </div>
+                        <div class="task-palette__body" id="taskPaletteBody">
+                            <!-- Cards rendered by task-palette.js -->
+                        </div>
+                    </div>
+                </div>
+                <svg id="crossWireSVG" class="canvas-wires" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;pointer-events:none;z-index:0"></svg>
+                <div id="world" style="position:relative;min-width:100%;min-height:100%;transform-origin:0 0"></div>
+                <svg id="previewSVG" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;pointer-events:none;z-index:999"></svg>
+                <svg id="deleteBtnSVG" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;pointer-events:none;z-index:998"></svg>
+                <div id="zoomBar">
+                    <span id="zoomLabel">100%</span>
+                    <button id="zoomMinus" class="zoom-btn">−</button>
+                    <div id="zoomTrack">
+                        <div id="zoomFill"></div>
+                        <div id="zoomThumb"></div>
+                        <span class="zoom-tick" data-zoom="0.3" style="left:0%">|</span>
+                        <span class="zoom-tick" data-zoom="1.0" style="left:41.18%">|</span>
+                        <span class="zoom-tick" data-zoom="2.0" style="left:100%">|</span>
+                    </div>
+                    <button id="zoomPlus" class="zoom-btn">+</button>
+                </div>
+            </div>
+            <div id="codePreview" class="code-preview code-preview--collapsed">
+                <div class="code-preview__resize"></div>
+                <div class="code-preview__header">
+                    <span class="code-preview__label" data-i18n="code.label">代码预览</span>
+                    <div class="code-preview__search">
+                        <input id="codeSearchInput" class="code-preview__search-input" type="text" data-i18n-placeholder="code.searchPlaceholder" />
+                        <span id="codeSearchCount" class="code-preview__search-count"></span>
+                        <button id="codeSearchPrev" class="code-preview__search-btn">▲</button>
+                        <button id="codeSearchNext" class="code-preview__search-btn">▼</button>
+                        <button id="codeSearchClose" class="code-preview__search-btn">✕</button>
+                    </div>
+                    <button id="codePreviewFullscreen" class="code-preview__fullscreen-btn">⛶</button>
+                </div>
+                <div class="code-preview__body">
+                    <pre class="code-preview__code line-numbers"><code id="codePreviewContent" class="language-python"></code></pre>
+                </div>
+            </div>
+        </div>
+        <div id="consolePane" class="console-pane">
+            <div class="console-pane__resize console-pane__resize--top" id="consoleResizeTop"></div>
+            <div class="console-pane__queue" id="consoleQueue"></div>
+            <div class="console-pane__body">
+                <pre class="console-pane__lines" id="consoleLines"></pre>
+                <button class="console-pane__cancel" id="consoleCancel" hidden data-i18n="console.cancel">取消</button>
+            </div>
+        </div>
+    </div>
+    <div id="startupDialog" class="startup-dialog startup-dialog--hidden">
+    <div class="startup-dialog__card">
+        <h2 class="startup-dialog__title" data-i18n="startup.chooseDirTitle">工作目录</h2>
+        <p class="startup-dialog__msg" id="startupDialogMsg" data-i18n="startup.chooseDirMsg">请选择工作目录，或进入临时模式</p>
+        <div class="startup-dialog__actions" id="startupDialogActions">
+            <button id="startupBtnHistory" class="startup-btn startup-btn--primary" style="display:none" data-i18n="startup.useHistory">使用历史目录</button>
+            <div class="startup-dialog__path" id="startupDialogPath" style="display:none"></div>
+            <button id="startupBtnNew" class="startup-btn startup-btn--primary" data-i18n="startup.chooseNew">选择新目录</button>
+            <button id="startupBtnTemp" class="startup-btn" data-i18n="startup.tempMode">临时模式</button>
+        </div>
+        <p class="startup-dialog__warn" id="startupDialogWarn" data-i18n="startup.tempWarn">临时模式请注意及时导出文件，避免工程丢失</p>
+    </div>
+</div>
+<div id="busyBackendDialog" class="startup-dialog startup-dialog--hidden">
+    <div class="startup-dialog__card">
+        <h2 class="startup-dialog__title" data-i18n="startup.busyTitle">后端已被占用</h2>
+        <p class="startup-dialog__msg" id="busyBackendMsg" data-i18n="startup.busyMsg">后端已被占用，是否强制连入并断开其他连接？</p>
+        <div class="startup-dialog__actions startup-dialog__actions--row">
+            <button id="busyBackendCancel" class="startup-btn" data-i18n="startup.cancel">取消</button>
+            <button id="busyBackendConfirm" class="startup-btn startup-btn--primary" data-i18n="startup.confirm">确认</button>
+        </div>
+    </div>
+</div>
+<div id="saveConfirmDialog" class="startup-dialog startup-dialog--hidden">
+    <div class="startup-dialog__card">
+        <h2 class="startup-dialog__title" data-i18n="startup.saveTitle">保存更改</h2>
+        <p class="startup-dialog__msg" data-i18n="startup.saveMsg">当前工程有未保存的更改，是否保存？</p>
+        <div class="startup-dialog__actions startup-dialog__actions--row">
+            <button id="saveConfirmCancel" class="startup-btn" data-i18n="startup.cancel">取消</button>
+            <button id="saveConfirmDiscard" class="startup-btn" data-i18n="startup.discard">不保存</button>
+            <button id="saveConfirmSave" class="startup-btn startup-btn--primary" data-i18n="startup.save">保存</button>
+        </div>
+    </div>
+</div>
+<script type="module" src="/src/js/main.js"></script>
+</body>
+</html>

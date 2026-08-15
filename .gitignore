@@ -1,0 +1,23 @@
+# Node
+node_modules/
+
+# Build output
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Python（droidtaskflow/ DSL 运行时随包携带）
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Dev-tools screenshots (created by scripts/dev-tools/shot.mjs)
+tmp-shots/
+
+# Headless Chrome profile (created by dev-tools repro scripts)
+scripts/dev-tools/.chrome-profile/
+AGENTS.md

@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>贝塞尔曲线调参器（6 点 / degree-5）</title>
+<style>
+  :root { --bg:#14161a; --panel:#1c1f26; --line:#333; --grid:rgba(255,255,255,.06); --text:#ddd; --mute:#888; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:var(--bg); color:var(--text); }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { font-size:14px; margin:0; }
+  header .hint { font-size:11px; color:var(--mute); }
+  main { display:flex; flex-wrap:wrap; gap:14px; padding:14px; }
+  canvas { background:#0e1013; border:1px solid var(--line); border-radius:6px; touch-action:none; cursor:crosshair; }
+  .panel { width:300px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; font-size:12px; }
+  .panel h2 { font-size:12px; margin:10px 0 6px; color:#fff; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  .panel h2:first-child { margin-top:0; }
+  .ctrl { display:flex; align-items:center; gap:8px; margin:6px 0; }
+  .ctrl label { width:74px; flex:0 0 auto; color:var(--mute); }
+  .ctrl input[type=range] { flex:1; }
+  .ctrl input[type=number] { width:74px; background:#0e1013; color:#7fd0ff; border:1px solid var(--line); border-radius:4px; padding:2px 4px; font:inherit; }
+  .formula { font-size:11px; color:#9be39b; background:#0e1013; border:1px solid var(--line); border-radius:4px; padding:6px; margin:8px 0; line-height:1.6; cursor:text; }
+  .formula:focus { outline:1px solid #7fd0ff; }
+  .formula .c { color:#7fd0ff; }
+  .formula-hint { font-size:10px; color:var(--mute); margin-top:2px; }
+  .formula-actions { display:flex; gap:8px; align-items:center; margin:8px 0 2px; }
+  .formula-actions button { background:#2a2f3a; color:#fff; border:1px solid var(--line); border-radius:4px; padding:3px 12px; font:inherit; font-size:11px; cursor:pointer; }
+  .formula-actions button:hover { background:#353c4a; }
+  .formula-actions .primary { background:#1f6feb; border-color:#1f6feb; }
+  .formula-actions .primary:hover { background:#3b82f6; }
+  .formula-status { font-size:11px; color:#ffb34d; }
+  .formula-status.ok { color:#7be07b; }
+  .pts { font-size:11px; line-height:1.6; color:var(--mute); }
+  .pts b { color:#fff; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  legend { display:flex; flex-direction:column; gap:3px; margin-top:8px; font-size:11px; color:var(--mute); }
+</style>
+</head>
+<body>
+<header>
+  <h1>贝塞尔曲线调参器</h1>
+  <span class="hint">6 点（degree-5）· 端点可拖拽 · 滑块实时调参</span>
+</header>
+<main>
+  <div>
+    <canvas id="cv" width="920" height="540"></canvas>
+  </div>
+  <div class="panel">
+    <h2>曲线公式</h2>
+    <div class="formula" contenteditable="true" spellcheck="false">
+      <span class="c">mx</span> = max(abs(tx - fx) * factorx, min * zoom)<br>
+      <span class="c">my</span> = (ty - fy) * factory<br>
+      P0 (fx, fy)<br>
+      P1 (fx + mx, fy)<br>
+      P2 (fx + mx, fy + my)<br>
+      P3 (tx - mx, ty - my)<br>
+      P4 (tx - mx, ty)<br>
+      P5 (tx, ty)
+    </div>
+    <div class="formula-actions">
+      <button id="applyBtn" class="primary">应用</button>
+      <button id="resetBtn">恢复默认</button>
+      <span class="formula-status" id="formulaStatus"></span>
+    </div>
+    <div class="formula-hint">公式框支持 Python 语法 → 点「应用」生效。变量 fx fy tx ty factorx factory min max zoom mx my + 自定义变量；支持 + - * / // % **、比较 &lt; &lt;= &gt; &gt;= == !=、and/or/not、三元 a if c else b、函数 abs() min() max() float('inf')。未知名自动变成可调的自定义变量。「恢复默认」还原。</div>
+
+    <h2>参数</h2>
+    <div class="ctrl"><label>factorx</label><input type="range" id="factorx" min="0" max="2" step="0.01" value="0.5"><input type="number" id="factorxN" min="0" max="5" step="0.01" value="0.5"></div>
+    <div class="ctrl"><label>factory</label><input type="range" id="factory" min="0" max="2" step="0.01" value="0.8"><input type="number" id="factoryN" min="0" max="5" step="0.01" value="0.8"></div>
+    <div class="ctrl"><label>min</label><input type="range" id="min" min="0" max="200" step="1" value="30"><input type="number" id="minN" min="0" max="500" step="1" value="30"></div>
+    <div class="ctrl"><label>max</label><input type="range" id="max" min="10" max="900" step="1" value="300"><input type="number" id="maxN" min="0" max="2000" step="1" value="300"></div>
+    <div class="ctrl"><label>zoom</label><input type="range" id="zoom" min="0.3" max="3" step="0.01" value="1"><input type="number" id="zoomN" min="0.1" max="10" step="0.01" value="1"></div>
+    <div class="ctrl"><label>t</label><input type="range" id="t" min="0" max="1" step="0.005" value="0.5"><input type="number" id="tN" min="0" max="1" step="0.005" value="0.5"></div>
+
+    <h2>端点（画布上直接拖）</h2>
+    <div class="ctrl"><label>fx</label><input type="number" id="fx" value="620"></div>
+    <div class="ctrl"><label>fy</label><input type="number" id="fy" value="130"></div>
+    <div class="ctrl"><label>tx</label><input type="number" id="tx" value="220"></div>
+    <div class="ctrl"><label>ty</label><input type="number" id="ty" value="390"></div>
+
+    <div id="customVarsBox" style="display:none">
+      <h2>自定义变量</h2>
+      <div id="customVars"></div>
+    </div>
+
+    <h2>计算值</h2>
+    <div class="pts" id="pts">…</div>
+
+    <legend>
+      <span><span class="sw" style="background:#4d9fff"></span>P0 起点</span>
+      <span><span class="sw" style="background:#7be07b"></span>P1 / P4 原控制点</span>
+      <span><span class="sw" style="background:#ffb34d"></span>P2 / P3 新增控制点</span>
+      <span><span class="sw" style="background:#ff5f6d"></span>P5 终点</span>
+      <span><span class="sw" style="background:#fff"></span>曲线上 t 点</span>
+    </legend>
+  </div>
+</main>
+
+<script>
+(function () {
+  const canvas = document.getElementById('cv');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  /* ---------- 参数 ---------- */
+  let params = {
+    factorx: 0.5, factory: 0.8, min: 30, max: 300, zoom: 1, t: 0.5,
+    fx: 620, fy: 130, tx: 220, ty: 390,
+  };
+
+  /* ---------- 控件绑定 ---------- */
+  const rangeMap = { factorx:'factorxN', factory:'factoryN', min:'minN', max:'maxN', zoom:'zoomN', t:'tN' };
+  function bindSlider(k) {
+    const r = document.getElementById(k), n = document.getElementById(rangeMap[k]);
+    r.addEventListener('input', () => { n.value = r.value; params[k] = parseFloat(r.value); draw(); });
+    n.addEventListener('input', () => { r.value = n.value; params[k] = parseFloat(n.value); draw(); });
+  }
+  Object.keys(rangeMap).forEach(bindSlider);
+  ['fx','fy','tx','ty'].forEach(k => {
+    document.getElementById(k).addEventListener('input', e => {
+      params[k] = parseFloat(e.target.value) || 0; draw();
+    });
+  });
+
+  /* ---------- 公式应用 ---------- */
+  const status = document.getElementById('formulaStatus');
+  const KNOWN_VARS = ['fx','fy','tx','ty','factorx','factory','min','max','zoom','mx','my'];
+  let customVars = {};              // 自定义变量名 -> 值
+  const customInputs = {};          // 自定义变量名 -> input
+
+  function ensureCustomVar(name) {
+    if (KNOWN_VARS.includes(name) || customInputs[name]) return;
+    customVars[name] = 0;
+    const row = document.createElement('div');
+    row.className = 'ctrl';
+    row.style.marginLeft = '8px';
+    const lab = document.createElement('label');
+    lab.textContent = name;
+    lab.style.width = 'auto';
+    const inp = document.createElement('input');
+    inp.type = 'number';
+    inp.step = 'any';
+    inp.value = 0;
+    inp.addEventListener('input', () => { customVars[name] = parseFloat(inp.value) || 0; draw(); });
+    const rm = document.createElement('button');
+    rm.textContent = '×';
+    rm.title = '删除该自定义变量';
+    rm.style.cssText = 'background:none;border:none;color:var(--mute);cursor:pointer;font-size:12px;padding:0 3px;';
+    rm.addEventListener('click', () => {
+      delete customVars[name];
+      delete customInputs[name];
+      row.remove();
+      syncCustomBox();
+      draw();
+    });
+    row.appendChild(lab); row.appendChild(inp); row.appendChild(rm);
+    document.getElementById('customVars').appendChild(row);
+    customInputs[name] = inp;
+    syncCustomBox();
+  }
+
+  function syncCustomBox() {
+    const box = document.getElementById('customVarsBox');
+    if (box) box.style.display = Object.keys(customInputs).length ? '' : 'none';
+  }
+
+  function syncCustomVars(names) {
+    for (const name of Object.keys(customInputs)) {
+      if (!names.has(name)) {
+        delete customVars[name];
+        customInputs[name].closest('.ctrl')?.remove();
+        delete customInputs[name];
+      }
+    }
+    for (const name of names) ensureCustomVar(name);
+    syncCustomBox();
+  }
+
+  document.getElementById('applyBtn').addEventListener('click', () => {
+    try {
+      const { parsed, names } = parseFormulaBox();
+      syncCustomVars(names);
+      formula = { ...DEFAULT_FORMULA, ...parsed };
+      status.textContent = '已应用 ✓';
+      status.className = 'formula-status ok';
+      draw();
+    } catch (err) {
+      status.textContent = '解析失败：' + err.message;
+      status.className = 'formula-status';
+    }
+  });
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    formula = DEFAULT_FORMULA;
+    syncCustomVars(new Set());
+    status.textContent = '';
+    status.className = 'formula-status';
+    draw();
+  });
+
+  /* ---------- 公式解析（Python 语法） ----------
+     变量：fx fy tx ty factorx factory min max zoom mx my（未知名自动注册为自定义变量）。
+     运算：+ - * / // % **；比较 < <= > >= == !=；逻辑 and or not；三元 a if c else b；
+     函数：abs() min() max() float('inf') int() round() sqrt() pow() floor() ceil()；
+     常量：True False None inf；字符串 'inf'。 */
+  const DEFAULT_FORMULA = {
+    mx: e => Math.max(Math.abs(e.tx - e.fx) * e.factorx, e.min * e.zoom),
+    my: e => (e.ty - e.fy) * e.factory,
+    P0: [e => e.fx, e => e.fy],
+    P1: [e => e.fx + e.mx, e => e.fy],
+    P2: [e => e.fx + e.mx, e => e.fy + e.my],
+    P3: [e => e.tx - e.mx, e => e.ty - e.my],
+    P4: [e => e.tx - e.mx, e => e.ty],
+    P5: [e => e.tx, e => e.ty],
+  };
+  let formula = DEFAULT_FORMULA;
+
+  const BUILTIN_FNS = {
+    abs: v => Math.abs(v),
+    min: (...a) => Math.min(...a),
+    max: (...a) => Math.max(...a),
+    float: v => typeof v === 'string' ? (v === 'inf' ? Infinity : v === '-inf' ? -Infinity : parseFloat(v)) : Number(v),
+    int: v => Math.trunc(v),
+    round: v => Math.round(v),
+    sqrt: v => Math.sqrt(v),
+    pow: (a, b) => Math.pow(a, b),
+    floor: v => Math.floor(v),
+    ceil: v => Math.ceil(v),
+  };
+
+  function tokenize(src) {
+    const tokens = [];
+    let i = 0;
+    while (i < src.length) {
+      const ch = src[i];
+      if (/\s/.test(ch)) { i++; continue; }
+      if (ch === '−' || ch === '–' || ch === '—') { tokens.push({ t: 'op', v: '-' }); i++; continue; }
+      if (ch === '×' || ch === '·') { tokens.push({ t: 'op', v: '*' }); i++; continue; }
+      if (ch === '÷') { tokens.push({ t: 'op', v: '/' }); i++; continue; }
+      const num = src.slice(i).match(/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/);
+      if (num) { tokens.push({ t: 'num', v: parseFloat(num[0]) }); i += num[0].length; continue; }
+      if (ch === "'" || ch === '"') {
+        const q = ch;
+        let j = i + 1;
+        while (j < src.length && src[j] !== q) j++;
+        if (j >= src.length) throw new Error('字符串缺少闭合引号');
+        tokens.push({ t: 'str', v: src.slice(i + 1, j) });
+        i = j + 1; continue;
+      }
+      if (/[a-zA-Z_]/.test(ch)) {
+        let j = i;
+        while (j < src.length && /[a-zA-Z0-9_]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        if (/^(if|else|and|or|not|True|False|None|inf)$/.test(word)) tokens.push({ t: 'kw', v: word });
+        else tokens.push({ t: 'name', v: word });
+        i = j; continue;
+      }
+      const two = src.slice(i, i + 2);
+      if (two === '**' || two === '//' || two === '==' || two === '!=' || two === '<=' || two === '>=') {
+        tokens.push({ t: 'op', v: two }); i += 2; continue;
+      }
+      if ('+-*/%()[],<>'.includes(ch)) { tokens.push({ t: 'op', v: ch }); i++; continue; }
+      if (ch === '|') { tokens.push({ t: 'bar' }); i++; continue; }
+      throw new Error('无法识别的字符 "' + ch + '"');
+    }
+    tokens.push({ t: 'eof' });
+    return tokens;
+  }
+
+  function compile(src, register) {
+    const tokens = tokenize(src);
+    let pos = 0;
+    const peek = () => tokens[pos];
+    const next = () => tokens[pos++];
+    const isOp = (t, v) => t && t.t === 'op' && t.v === v;
+    const isKw = (t, v) => t && t.t === 'kw' && t.v === v;
+    const eat = v => { const t = next(); if (t.v !== v) throw new Error('期望 "' + v + '"，实际 "' + (t.v ?? t.t) + '"'); };
+
+    function parseExpr() {
+      const a = parseOr();
+      if (isKw(peek(), 'if')) {
+        next();
+        const cond = parseOr();
+        if (!isKw(peek(), 'else')) throw new Error('三元表达式缺少 else');
+        next();
+        const b = parseExpr();
+        return env => (cond(env) ? a(env) : b(env));
+      }
+      return a;
+    }
+    function parseOr() {
+      let left = parseAnd();
+      while (isKw(peek(), 'or')) {
+        next(); const right = parseAnd(); const l = left;
+        left = env => { const lv = l(env); return lv ? lv : right(env); };
+      }
+      return left;
+    }
+    function parseAnd() {
+      let left = parseNot();
+      while (isKw(peek(), 'and')) {
+        next(); const right = parseNot(); const l = left;
+        left = env => { const lv = l(env); return lv ? right(env) : lv; };
+      }
+      return left;
+    }
+    function parseNot() {
+      if (isKw(peek(), 'not')) { next(); const inner = parseNot(); return env => (inner(env) ? 0 : 1); }
+      return parseComparison();
+    }
+    function parseComparison() {
+      let left = parseArith();
+      const ops = [], rights = [];
+      while (isOp(peek(), '==') || isOp(peek(), '!=') || isOp(peek(), '<') || isOp(peek(), '<=') || isOp(peek(), '>') || isOp(peek(), '>=')) {
+        ops.push(next().v); rights.push(parseArith());
+      }
+      if (!ops.length) return left;
+      return env => {
+        const vals = [left(env)];
+        for (let i = 0; i < rights.length; i++) vals.push(rights[i](env));
+        for (let i = 0; i < ops.length; i++) {
+          const a = vals[i], b = vals[i + 1];
+          const ok = ops[i] === '==' ? a === b : ops[i] === '!=' ? a !== b
+                   : ops[i] === '<' ? a < b : ops[i] === '<=' ? a <= b
+                   : ops[i] === '>' ? a > b : a >= b;
+          if (!ok) return 0;
+        }
+        return 1;
+      };
+    }
+    function parseArith() {
+      let left = parseTerm();
+      while (isOp(peek(), '+') || isOp(peek(), '-')) {
+        const op = next().v; const right = parseTerm(); const l = left;
+        left = env => op === '+' ? l(env) + right(env) : l(env) - right(env);
+      }
+      return left;
+    }
+    function parseTerm() {
+      let left = parseFactor();
+      while (isOp(peek(), '*') || isOp(peek(), '/') || isOp(peek(), '//') || isOp(peek(), '%')) {
+        const op = next().v; const right = parseFactor(); const l = left;
+        left = env => {
+          const lv = l(env), rv = right(env);
+          return op === '*' ? lv * rv : op === '/' ? lv / rv : op === '//' ? Math.floor(lv / rv) : lv % rv;
+        };
+      }
+      return left;
+    }
+    function parseFactor() {
+      if (isOp(peek(), '-') || isOp(peek(), '+')) {
+        const sign = next().v; const inner = parseFactor();
+        return env => sign === '-' ? -inner(env) : +inner(env);
+      }
+      return parsePower();
+    }
+    function parsePower() {
+      const base = parseAtom();
+      if (isOp(peek(), '**')) {
+        next(); const exp = parseFactor();
+        return env => Math.pow(base(env), exp(env));
+      }
+      return base;
+    }
+    function parseAtom() {
+      const t = peek();
+      if (t.t === 'num') { next(); const v = t.v; return env => v; }
+      if (t.t === 'str') { next(); const v = t.v; return env => v; }
+      if (t.t === 'kw') {
+        next();
+        if (t.v === 'True') return env => 1;
+        if (t.v === 'False') return env => 0;
+        if (t.v === 'None') return env => NaN;
+        if (t.v === 'inf') return env => Infinity;
+        throw new Error('关键字位置错误: ' + t.v);
+      }
+      if (t.t === 'name') {
+        next();
+        const name = t.v;
+        if (isOp(peek(), '(')) {
+          next();
+          const args = [];
+          if (!isOp(peek(), ')')) {
+            args.push(parseExpr());
+            while (isOp(peek(), ',')) { next(); args.push(parseExpr()); }
+          }
+          eat(')');
+          if (!BUILTIN_FNS[name]) throw new Error('不认识的函数 "' + name + '"');
+          const fn = BUILTIN_FNS[name];
+          return env => fn(...args.map(a => a(env)));
+        }
+        if (register) register(name);
+        return env => env[name];
+      }
+      if (t.t === 'bar') {
+        next(); const inner = parseArith();
+        if (peek().t !== 'bar') throw new Error('绝对值 |…| 缺少右边界');
+        next();
+        return env => Math.abs(inner(env));
+      }
+      if (isOp(t, '(')) {
+        next(); const inner = parseExpr(); eat(')'); return inner;
+      }
+      throw new Error('此处无法解析: "' + (t.v ?? t.t) + '"');
+    }
+
+    const ast = parseExpr();
+    if (peek().t !== 'eof') throw new Error('多余的输入: "' + (peek().v ?? peek().t) + '"');
+    return ast;
+  }
+
+  function splitTopLevel(s) {
+    const parts = []; let depth = 0, cur = '';
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      if (c === ',' && depth === 0) { parts.push(cur); cur = ''; }
+      else cur += c;
+    }
+    parts.push(cur);
+    return parts.map(p => p.trim());
+  }
+
+  function parseFormulaBox() {
+    const parsed = {};
+    const names = new Set();
+    const reg = n => names.add(n);
+    for (const rawLine of document.querySelector('.formula').innerText.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      let m = line.match(/^(mx|my)\s*=\s*(.+)$/);
+      if (m) { parsed[m[1]] = compile(m[2], reg); continue; }
+      m = line.match(/^P(\d)\s*\(\s*(.*)\s*\)$/);
+      if (m) {
+        const parts = splitTopLevel(m[2]);
+        if (parts.length !== 2) throw new Error('P' + m[1] + ' 需要两个逗号分隔的表达式');
+        parsed['P' + m[1]] = [compile(parts[0], reg), compile(parts[1], reg)];
+      }
+      // 其余行（注释等）忽略
+    }
+    return { parsed, names };
+  }
+
+  /* ---------- 几何 ---------- */
+  function computePts(p) {
+    const base = { fx: p.fx, fy: p.fy, tx: p.tx, ty: p.ty, factorx: p.factorx, factory: p.factory, min: p.min, max: p.max, zoom: p.zoom };
+    const env0 = { ...base, ...customVars, mx: 0, my: 0 };
+    const mx = formula.mx(env0);
+    const my = formula.my({ ...env0, mx, my: 0 });
+    const env = { ...env0, mx, my };
+    const pts = [];
+    for (let i = 0; i <= 5; i++) {
+      const [cx, cy] = formula['P' + i] || DEFAULT_FORMULA['P' + i];
+      pts.push({ x: cx(env), y: cy(env) });
+    }
+    return { mx, my, pts };
+  }
+  function deCasteljau(P, t) {
+    let a = P.map(pt => ({ x: pt.x, y: pt.y }));
+    for (let r = 1; r < P.length; r++)
+      for (let i = 0; i < P.length - r; i++)
+        a[i] = { x: (1-t)*a[i].x + t*a[i+1].x, y: (1-t)*a[i].y + t*a[i+1].y };
+    return a[0];
+  }
+
+  /* ---------- 绘制 ---------- */
+  function draw() {
+    const { mx, my, pts } = computePts(params);
+
+    // 清屏 + 网格
+    ctx.fillStyle = '#0e1013';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = 0; y <= H; y += 40) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+
+    // 控制多边形
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(255,255,255,.28)';
+    ctx.beginPath();
+    pts.forEach((pt, i) => { i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y); });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 曲线（300 点采样）
+    ctx.strokeStyle = '#7fd0ff';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let i = 0; i <= 300; i++) {
+      const p = deCasteljau(pts, i / 300);
+      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
+    }
+    ctx.stroke();
+
+    // 控制点
+    const colors = ['#4d9fff', '#7be07b', '#ffb34d', '#ffb34d', '#7be07b', '#ff5f6d'];
+    const labels = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5'];
+    pts.forEach((pt, i) => {
+      ctx.fillStyle = colors[i];
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, i === 0 || i === 5 ? 5 : 4, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#0e1013'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(labels[i] + ` (${Math.round(pt.x)}, ${Math.round(pt.y)})`, pt.x + 8, pt.y - 6);
+    });
+
+    // t 点
+    const tp = deCasteljau(pts, params.t);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(tp.x, tp.y, 4.5, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#0e1013'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    // 读数（默认公式带拆解，自定义公式只显示结果）
+    const readout = (formula === DEFAULT_FORMULA)
+      ? `mx = <b>${mx.toFixed(1)}</b>　(max(<b>${(Math.abs(params.tx - params.fx) * params.factorx).toFixed(1)}</b>, min×zoom=<b>${(params.min * params.zoom).toFixed(1)}</b>))<br>` +
+        `my = <b>${my.toFixed(1)}</b>　((ty−fy)×factory = <b>${((params.ty - params.fy) * params.factory).toFixed(1)}</b>)<br>` +
+        `t 点 = (${tp.x.toFixed(1)}, ${tp.y.toFixed(1)})`
+      : `mx = <b>${mx.toFixed(1)}</b><br>my = <b>${my.toFixed(1)}</b><br>t 点 = (${tp.x.toFixed(1)}, ${tp.y.toFixed(1)})`;
+    document.getElementById('pts').innerHTML = readout;
+  }
+
+  /* ---------- 端点拖拽 ---------- */
+  let dragging = null;
+  function canvasPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+  }
+  function hitEnd(pos) {
+    const d0 = Math.hypot(pos.x - params.fx, pos.y - params.fy);
+    const d5 = Math.hypot(pos.x - params.tx, pos.y - params.ty);
+    if (d0 < 14 || d5 < 14) return d0 < d5 ? 'start' : 'end';
+    return null;
+  }
+  canvas.addEventListener('pointerdown', e => {
+    dragging = hitEnd(canvasPos(e));
+    if (dragging) canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const pos = canvasPos(e);
+    if (dragging === 'start') { params.fx = pos.x; params.fy = pos.y; }
+    else { params.tx = pos.x; params.ty = pos.y; }
+    ['fx','fy','tx','ty'].forEach(k => document.getElementById(k).value = Math.round(params[k]));
+    draw();
+  });
+  canvas.addEventListener('pointerup', () => { dragging = null; });
+
+  draw();
+})();
+</script>
+</body>
+</html>

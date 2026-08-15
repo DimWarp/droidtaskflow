@@ -1,0 +1,22 @@
+{
+  "name": "droidtaskflow",
+  "version": "0.1.0",
+  "description": "DroidTaskFlow visual editor",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "check": "node scripts/dev-tools/health-check.mjs",
+    "dev:probe": "node scripts/dev-tools/probe.mjs",
+    "dev:shot": "node scripts/dev-tools/shot.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "vite": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  }
+}
