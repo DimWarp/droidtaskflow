@@ -26,6 +26,9 @@
     --font-code: 'Maple Mono SC NF', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
     --font-mono: 'Maple Mono SC NF', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
     --grid-dot: rgba(24,24,28,.08); --port-default: oklch(0.62 0.02 270);
+    /* 代码输入框 Python 语法高亮（亮色，VS Code Light+ 系） */
+    --code-keyword: #af00db; --code-string: #a31515; --code-number: #098658;
+    --code-comment: #008000; --code-builtin: #0070c1; --code-decorator: #795e26;
 }
 [data-theme="dark"] {
     --accent: #a5a3f5; --accent-soft: #2a2766; --on-accent: #15123d;
@@ -34,6 +37,9 @@
     --border: #34343e; --border-soft: #22222a;
     --el-1: 0 1px 2px rgba(0,0,0,.5); --el-2: 0 4px 12px rgba(0,0,0,.6);
     --grid-dot: rgba(255,255,255,.08); --port-default: oklch(0.55 0.02 270);
+    /* 代码输入框 Python 语法高亮（暗色，VS Code Dark+ 系） */
+    --code-keyword: #569cd6; --code-string: #ce9178; --code-number: #b5cea8;
+    --code-comment: #6a9955; --code-builtin: #4ec9b0; --code-decorator: #dcdcaa;
 }
 /* 主题切换立即变色：切换瞬间给 <html> 挂 .theme-freeze 临时禁用全部 transition
    （JS 两帧后摘除），所有元素同一帧换新主题色，不做渐变。日常 hover 过渡不受影响。 */
@@ -274,7 +280,34 @@ input, textarea, [contenteditable="true"] { user-select: text !important; -webki
     background-clip: border-box;
     background-image: linear-gradient(transparent 0, transparent calc(100% - 2px), var(--accent) calc(100% - 2px), var(--accent) 100%);
 }
-textarea.field__input { height: 64px; min-height: 64px; max-height: 64px; resize: none; padding: 4px 6px; line-height: 1.4; overflow-y: auto; }
+/* 代码输入框（type=code）：容器 = 行号列 + 编辑器区（高亮 pre + 透明文字 textarea）。
+   高度完全由高亮层 pre 的内容自动撑起（min-height 兜底）：拖动节点宽度改变折行后，
+   pre 自动重排收缩/撑高，textarea 绝对定位铺满容器随之变化，无需 JS 改高度。
+   overflow: hidden 不显示滚动条；pre-wrap + break-word 保证超宽行自动软换行。 */
+.code-field { display: flex; align-items: stretch; width: 100%; min-width: 0; box-sizing: border-box; background: var(--surface-hi); border: none; border-bottom: 1px solid var(--border); border-radius: var(--r-xs) var(--r-xs) 0 0; overflow: hidden; }
+.code-field:focus-within {
+    border-bottom-color: transparent;
+    /* 2px 蓝色聚焦线：与 .field__input:focus 同一套背景渐变技巧（画满容器底部 2px） */
+    background-origin: border-box;
+    background-clip: border-box;
+    background-image: linear-gradient(transparent 0, transparent calc(100% - 2px), var(--accent) calc(100% - 2px), var(--accent) 100%);
+}
+.code-field__editor { position: relative; flex: 1 1 auto; min-width: 0; }
+/* 高亮层：普通流撑起容器高度，与 textarea 字体/字号/行高/padding/换行规则逐项一致才能逐字符对齐 */
+.code-field__hl { margin: 0; min-height: 24px; padding: 4px 6px; box-sizing: border-box; font-family: var(--font-mono); font-size: 11px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: break-word; color: var(--on-surface); overflow: hidden; }
+/* 每逻辑行一个 block 行容器：与 textarea 的按行布局/软换行一致（裸文本连续流会折行不同） */
+.code-field__hl > div { white-space: pre-wrap; overflow-wrap: break-word; }
+.code-field__hl .tk-comment { color: var(--code-comment); }
+.code-field__hl .tk-string { color: var(--code-string); }
+.code-field__hl .tk-number { color: var(--code-number); }
+.code-field__hl .tk-decorator { color: var(--code-decorator); }
+.code-field__hl .tk-keyword { color: var(--code-keyword); }
+.code-field__hl .tk-builtin { color: var(--code-builtin); }
+.code-field textarea.field__input { position: absolute; inset: 0; height: auto; min-height: 0; width: auto; resize: none; padding: 4px 6px; line-height: 1.4; overflow: hidden; white-space: pre-wrap; overflow-wrap: break-word; background: transparent; border: none; border-radius: 0; font-family: var(--font-mono); color: transparent; caret-color: var(--on-surface); flex: none; }
+.code-field textarea.field__input:focus { background-image: none; border-bottom-color: transparent; }
+/* IME 组合输入期间文字临时可见（透明文字下拼音候选不可见），compositionend 后恢复并重渲高亮 */
+.code-field textarea.field__input.code-field__composing { color: var(--on-surface); }
+.code-field__gutter { flex: 0 0 auto; min-width: 18px; padding: 4px 6px 4px 8px; text-align: right; font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--on-surface-mute); background: var(--surface-lo); border-right: 1px solid var(--border); user-select: none; -webkit-user-select: none; overflow: hidden; }
 /* 顶部 4px 放在 field-row 整体上：同排并排字段全部对齐（若放首字段，第二个输入框会偏高）；
    字段之间的行距由 row-gap 控制 */
 .field-row { display: flex; flex-wrap: wrap; row-gap: 2.5px; column-gap: 6px; margin-top: 4px; min-width: 0; }
@@ -1116,6 +1149,14 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     /* width 由 global-vars.js 的 updateValueWidth() 动态设为"刚好放下当前文本"的精确像素值 */
 }
 .gv-item__value:focus { border-color: var(--accent); }
+/* dict/list 类型的值输入：多行 textarea。
+   宽度由 JS 按"最宽一行"自适应；white-space: pre 禁止软换行（\n 换行保留），
+   高度由内容驱动（1 行起，主动换行才撑高），overflow: hidden 无横竖滚动条 */
+.gv-item__value--multi {
+    width: auto; min-width: 48px; height: auto; min-height: 22px;
+    resize: none; line-height: 1.5; padding-top: 2px; padding-bottom: 2px;
+    overflow: hidden; white-space: pre;
+}
 .gv-item__value:disabled {
     color: var(--on-surface-mute); background: var(--surface-mid);
     cursor: not-allowed; opacity: 0.7;
@@ -1716,11 +1757,14 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     border-color: var(--accent);
 }
 
-/* 工具下拉：按钮 + 菜单。菜单相对按钮行绝对定位，右对齐工具按钮。 */
-.device-preview__tools {
+/* 操作/工具下拉：按钮 + 菜单。容器相对定位让菜单能绝对定位到自己下方，
+   容器内的按钮 width:100% 跟相邻的 dp-btn 按 flex 比例分配总宽。 */
+.device-preview__tools,
+.device-preview__actions {
     position: relative;
 }
-.device-preview__tools .dp-btn {
+.device-preview__tools .dp-btn,
+.device-preview__actions .dp-btn {
     width: 100%;
 }
 .device-tools-menu {

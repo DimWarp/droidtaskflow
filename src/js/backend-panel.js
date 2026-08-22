@@ -213,6 +213,9 @@ function renderDeviceList(backendId, li) {
         // M1: 选中设备 → 同时把父后端也设为选中（与"点击设备＝跑在设备上"的语义一致）
         setSelectedDevice(backendId, d.serial);
         setSelectedBackendId(backendId);
+        // 清掉其他后端选中的设备 — 全局只允许 1 个蓝底，否则跨后端点设备时
+        // 旧后端的选中设备仍保留 selected class（视觉漏清）。
+        _clearSelectedDevicesExcept(backendId);
         // M2: 同步 device preview widget
         setDevicePreviewSerial(d.serial);
         setDevicePreviewClient(_clients.get(backendId) || null);
@@ -225,6 +228,15 @@ function renderDeviceList(backendId, li) {
   li.appendChild(ul);
 }
 
+
+// 切到 backendId 后，把其他后端的 selected device 也清掉（保持全局唯一蓝底）。
+// 复用于：点后端 li 切后端、点设备 item 跨后端切设备。
+// 走 setSelectedDevice(_, null) 同步写 LS，避免"页面看蓝底没了但 LS 还残留"。
+function _clearSelectedDevicesExcept(backendId) {
+  for (const key of Object.keys(state.selectedDeviceByBackend)) {
+    if (key !== backendId) setSelectedDevice(key, null);
+  }
+}
 
 function refreshBackends() {
   const list = loadBackends();
@@ -333,9 +345,7 @@ function refreshBackends() {
       } else {
         setSelectedBackendId(b.id);
         // 清除其他后端的设备选中 UI：切后端时只有当前后端的设备可以是选中态
-        for (const key of Object.keys(state.selectedDeviceByBackend)) {
-          if (key !== b.id) delete state.selectedDeviceByBackend[key];
-        }
+        _clearSelectedDevicesExcept(b.id);
         // M2: 切换 active backend 时同步 client；device serial 沿用 state 中的值或 null
         const serial = state.selectedDeviceByBackend[b.id] || null;
         setDevicePreviewSerial(serial);

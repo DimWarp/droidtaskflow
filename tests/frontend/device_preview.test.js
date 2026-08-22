@@ -51,7 +51,7 @@ describe('device-preview init + fold + buttons', () => {
                     <button id="btnDeviceScreenshot" disabled>截图</button>
                     <button id="btnDeviceOpenImage">上传</button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -166,12 +166,10 @@ describe('device-preview init + fold + buttons', () => {
         dp.setActiveSerial('S49');
         expect(document.getElementById('btnDeviceScreenshot').disabled).toBe(false);
         // 模拟后端断开
-        client._state = 'disconnected';
-        client._emit('state', 'disconnected');
+        client._setState('disconnected');
         expect(document.getElementById('btnDeviceScreenshot').disabled).toBe(true);
         // 重连
-        client._state = 'connected';
-        client._emit('state', 'connected');
+        client._setState('connected');
         expect(document.getElementById('btnDeviceScreenshot').disabled).toBe(false);
     });
 
@@ -194,7 +192,7 @@ describe('device-preview renderStage from backend event', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -288,7 +286,7 @@ describe('device-preview picker', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -441,7 +439,7 @@ describe('device-preview infobar hover (实时坐标)', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty"></div>
                     <div id="devicePreviewInfobar">
                         <div id="devicePreviewInfobarPick">
@@ -559,7 +557,7 @@ describe('device-preview infobar click-to-copy', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty"></div>
                     <div id="devicePreviewInfobar">
                         <div id="devicePreviewInfobarPick">
@@ -633,7 +631,7 @@ describe('device-preview CSS rules', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -712,7 +710,7 @@ describe('device-preview stage render', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -772,7 +770,7 @@ describe('device-preview 宽度拖拽', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -860,7 +858,7 @@ describe('device-preview 按钮行动态布局（按内容宽分配 flex-grow）
                     <div class="device-preview__buttons">
                         <button id="btnDeviceScreenshot" class="dp-btn">short</button>
                         <button id="btnDeviceOpenImage" class="dp-btn">a-very-long-button-label</button>
-                        <button id="btnDeviceClear" class="dp-btn">mid</button>
+                        <button id="btnDeviceClear" class="device-tools-menu__item dp-btn">mid</button>
                         <div class="device-preview__tools">
                             <button id="btnDeviceTools" class="dp-btn">another-mid</button>
                         </div>
@@ -1103,7 +1101,7 @@ describe('device-preview clear button', () => {
                     <button id="btnDeviceScreenshot" disabled></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR" disabled>OCR</button>
-                    <button id="btnDeviceClear" disabled>清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" disabled data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -1237,7 +1235,7 @@ describe('device-preview spinner (waiting for backend)', () => {
                     <button id="btnDeviceScreenshot"></button>
                     <button id="btnDeviceOpenImage"></button>
                     <button id="btnDeviceOCR">OCR</button>
-                    <button id="btnDeviceClear">清空</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
                     <div id="devicePreviewStage" class="device-preview__stage--empty">
                         <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
                     </div>
@@ -1389,9 +1387,9 @@ describe('device-preview tools menu (无图时工具置灰)', () => {
                     <div class="device-preview__buttons">
                         <button id="btnDeviceScreenshot" disabled>截图</button>
                         <button id="btnDeviceOpenImage">上传</button>
-                        <button id="btnDeviceClear" disabled>清空</button>
+                        <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" disabled data-action="clear">清空</button></div>
                         <div class="device-preview__tools">
-                            <button id="btnDeviceTools">工具▾</button>
+                            <button id="btnDeviceTools"><span data-i18n="device.tools">工具</span><span class="dp-btn__arrow">▾</span></button>
                             <div id="deviceToolsMenu" hidden>
                                 <button class="device-tools-menu__item" data-tool="crop-copy">裁剪复制</button>
                                 <button class="device-tools-menu__item" data-tool="image-match">图像匹配</button>
@@ -1416,7 +1414,7 @@ describe('device-preview tools menu (无图时工具置灰)', () => {
         localStorage.clear();
     });
 
-    const allItems = () => [...document.querySelectorAll('.device-tools-menu__item')];
+    const allItems = () => [...document.querySelectorAll('#deviceToolsMenu .device-tools-menu__item')];
 
     it('无图时：裁剪复制/图像匹配/OCR 全部 disabled', async () => {
         const dp = await import('../../src/js/device-preview.js');
@@ -1444,8 +1442,7 @@ describe('device-preview tools menu (无图时工具置灰)', () => {
         expect(match.disabled).toBe(true);
         expect(ocr.disabled).toBe(true);
         // 后端连上（state 事件触发同步）→ OCR/图像匹配 enabled
-        client._state = 'connected';
-        client._emit('state', 'connected');
+        client._setState('connected');
         expect(match.disabled).toBe(false);
         expect(ocr.disabled).toBe(false);
     });
@@ -1742,5 +1739,131 @@ describe('device-preview tools menu (无图时工具置灰)', () => {
         // 取消裁剪（Esc），清理状态
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
         expect(stage.querySelector('.device-crop-mask')).toBeNull();
+    });
+});
+
+describe('M7 操作下拉：电源开/关（幂等）', () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="devicePreview" class="device-preview device-preview--collapsed">
+                <div id="devicePreviewHeader"></div>
+                <div id="devicePreviewBody">
+                    <div class="device-preview__buttons">
+                        <button id="btnDeviceScreenshot" disabled>截图</button>
+                        <button id="btnDeviceOpenImage">上传</button>
+                        <div class="device-preview__actions">
+                            <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                            <div id="deviceActionsMenu" class="device-tools-menu" hidden>
+                                <button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button>
+                                <button class="device-tools-menu__item" data-action="power-on">电源开</button>
+                                <button class="device-tools-menu__item" data-action="power-off">电源关</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="devicePreviewStage"></div>
+                    <div id="devicePreviewInfobar">
+                        <div id="devicePreviewInfobarPick"><span data-type="x">x: —</span></div>
+                        <div id="devicePreviewInfobarHover"><span data-type="x">x: —</span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    async function setupConnectedClient() {
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        client._ws = {
+            readyState: 1, sent: [],
+            send(msg) { this.sent.push(JSON.parse(msg)); },
+            close() {},
+        };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+        dp.setActiveSerial('S49');
+        return { dp, client };
+    }
+
+    function findSent(client, type) {
+        return client._ws.sent.find(m => m.type === type);
+    }
+
+    it('点电源开 → 发 device_power_req {action:"on"}，不走通用 keyevent', async () => {
+        const { client } = await setupConnectedClient();
+        // 打开操作菜单
+        document.getElementById('btnDeviceActions').click();
+        // 点电源开
+        document.querySelector('.device-tools-menu__item[data-action="power-on"]').click();
+
+        // 没发 keyevent 通用请求
+        expect(findSent(client, 'device_keyevent_req')).toBeUndefined();
+        // 发了幂等 power 请求
+        const sent = findSent(client, 'device_power_req');
+        expect(sent).toBeDefined();
+        expect(sent.action).toBe('on');
+        expect(sent.serial).toBe('S49');
+    });
+
+    it('点电源关 → 发 device_power_req {action:"off"}', async () => {
+        const { client } = await setupConnectedClient();
+        document.getElementById('btnDeviceActions').click();
+        document.querySelector('.device-tools-menu__item[data-action="power-off"]').click();
+
+        const sent = findSent(client, 'device_power_req');
+        expect(sent.action).toBe('off');
+        expect(sent.serial).toBe('S49');
+    });
+
+    it('reply applied=true（按了 key）不弹 toast', async () => {
+        const { client } = await setupConnectedClient();
+        document.getElementById('btnDeviceActions').click();
+        document.querySelector('.device-tools-menu__item[data-action="power-on"]').click();
+
+        // 模拟 reply: applied=true（后端真按了 POWER）
+        client._dispatch({ type: 'device_power_req:reply', ok: true, applied: true, action: 'on' });
+
+        // 等待 toast 渲染（如果有）
+        await new Promise(r => setTimeout(r, 30));
+        // 没 toast 出现
+        expect(document.querySelectorAll('.toast').length).toBe(0);
+    });
+
+    it('reply applied=false（幂等跳过）→ 调 toast 提示"已是开"（action=on）', async () => {
+        const stateMod = await import('../../src/js/state.js');
+        const spy = vi.spyOn(stateMod, 'toast');
+        try {
+            const { client } = await setupConnectedClient();
+            document.getElementById('btnDeviceActions').click();
+            document.querySelector('.device-tools-menu__item[data-action="power-on"]').click();
+
+            client._dispatch({ type: 'device_power_req:reply', ok: true, applied: false, action: 'on' });
+
+            // 期望 toast 被调用至少一次，且某次参数含"屏幕已亮"
+            expect(spy).toHaveBeenCalled();
+            const calls = spy.mock.calls.map(c => c[0]);
+            expect(calls.some(t => typeof t === 'string' && t.includes('屏幕已亮'))).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('reply applied=false action=off → 调 toast 提示"已是关"', async () => {
+        const stateMod = await import('../../src/js/state.js');
+        const spy = vi.spyOn(stateMod, 'toast');
+        try {
+            const { client } = await setupConnectedClient();
+            document.getElementById('btnDeviceActions').click();
+            document.querySelector('.device-tools-menu__item[data-action="power-off"]').click();
+
+            client._dispatch({ type: 'device_power_req:reply', ok: true, applied: false, action: 'off' });
+
+            expect(spy).toHaveBeenCalled();
+            const calls = spy.mock.calls.map(c => c[0]);
+            expect(calls.some(t => typeof t === 'string' && t.includes('屏幕已息'))).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
     });
 });

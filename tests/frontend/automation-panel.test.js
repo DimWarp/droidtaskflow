@@ -913,20 +913,29 @@ describe('排队中徽标', () => {
     __test.resetRuns();   // _activeRuns/_queuedRuns 为模块级状态，逐例清空防串扰
   });
 
-  it('run_queued 后任务卡片显示排队中，运行按钮禁用', () => {
+  it('run_queued 后任务卡片显示排队中，运行按钮变"取消"并可点击', () => {
     __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
     __test.handleMessage({ type: 'automation_run_started', run_id: 'r1', task_id: 't1' });
     __test.handleMessage({ type: 'automation_run_queued', run_id: 'r2', task_id: 't1' });
     const txt = document.querySelector('.automation__task-status').textContent;
     expect(txt).toContain('排队中');
     expect(txt).toContain('运行中');
-    expect(document.querySelector('.automation__task-actions [data-act="run"]').disabled).toBe(true);
+    const runBtn = document.querySelector('.automation__task-actions [data-act="run"]');
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.textContent).toBe(t('automation.cancel'));
   });
 
-  it('仅排队中时运行按钮也禁用', () => {
+  it('仅排队中时运行按钮也变"取消"，点击发送取消消息', () => {
+    const sent = [];
+    const cli = { state: 'connected', _automationHooked: false, on() {}, sendRaw(o) { sent.push(o); return true; } };
+    __test.setTestClient(cli);
     __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
     __test.handleMessage({ type: 'automation_run_queued', run_id: 'r2', task_id: 't1' });
-    expect(document.querySelector('.automation__task-actions [data-act="run"]').disabled).toBe(true);
+    const runBtn = document.querySelector('.automation__task-actions [data-act="run"]');
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.textContent).toBe(t('automation.cancel'));
+    runBtn.click();
+    expect(sent).toContainEqual({ type: 'automation_cancel', task_id: 't1' });
   });
 
   it('run_unqueued 后排队中徽标消失，运行按钮恢复可用', () => {
@@ -947,6 +956,57 @@ describe('排队中徽标', () => {
     expect(txt).not.toContain('运行中');
     expect(txt).not.toContain('排队中');
     expect(document.querySelector('.automation__task-actions [data-act="run"]').disabled).toBe(false);
+  });
+});
+
+describe('上次结果：EXIT 同步更新（不等 history_list 响应）', () => {
+  beforeEach(() => {
+    __test.setTestClient(fakeClient());
+  });
+
+  it('初始 history=[success] → 卡片显示成功', () => {
+    __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+    __test.handleMessage({
+      type: 'automation_history_list',
+      runs: [{ run_id: 'r1', task_id: 't1', status: 'success' }],
+    });
+    expect(document.querySelector('.automation__task-status').textContent)
+      .toContain('成功');
+  });
+
+  it('EXIT failed（无 history_list 响应）→ 卡片立即显示失败', () => {
+    // 关键场景：refreshHistory 是异步的，如果不等它返回就 renderTasks，
+    // 卡片会用 EXIT 之前的旧 _history 渲染，显示"成功"。EXIT 处理必须
+    // 同步把 status 写进 _history，renderTasks 才能立刻显示"失败"。
+    __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+    __test.handleMessage({
+      type: 'automation_history_list',
+      runs: [{ run_id: 'r1', task_id: 't1', status: 'success' }],
+    });
+    __test.handleMessage({
+      type: 'automation_exit', run_id: 'r2', task_id: 't1', code: 1, status: 'failed',
+    });
+    expect(document.querySelector('.automation__task-status').textContent)
+      .toContain('失败');
+  });
+
+  it('EXIT 后 history_list 响应回来 → _history 不重复（run_id 唯一，字段被完整版覆盖）', () => {
+    __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+    __test.handleMessage({
+      type: 'automation_exit', run_id: 'r2', task_id: 't1', code: 1, status: 'failed',
+    });
+    expect(__test.history.filter(r => r.run_id === 'r2').length).toBe(1);
+
+    __test.handleMessage({
+      type: 'automation_history_list',
+      runs: [
+        { run_id: 'r2', task_id: 't1', status: 'failed', duration_ms: 1234 },
+        { run_id: 'r1', task_id: 't1', status: 'success' },
+      ],
+    });
+    const r2 = __test.history.find(r => r.run_id === 'r2');
+    expect(r2.duration_ms).toBe(1234);
+    expect(__test.history.filter(r => r.run_id === 'r2').length).toBe(1);
   });
 });
 

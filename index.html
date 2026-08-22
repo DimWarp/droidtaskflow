@@ -126,9 +126,16 @@
                             <div class="device-preview__buttons">
                                 <button id="btnDeviceScreenshot" class="dp-btn" disabled data-i18n="device.screenshot">截图</button>
                                 <button id="btnDeviceOpenImage" class="dp-btn" data-i18n="device.upload">上传</button>
-                                <button id="btnDeviceClear" class="dp-btn" disabled data-i18n="device.clear">清空</button>
+                                <div class="device-preview__actions">
+                                    <button id="btnDeviceActions" class="dp-btn"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                                    <div id="deviceActionsMenu" class="device-tools-menu" hidden>
+                                        <button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear" disabled data-i18n="device.clear">清空</button>
+                                        <button class="device-tools-menu__item" data-action="power-on" disabled data-i18n="device.powerOn">电源开</button>
+                                        <button class="device-tools-menu__item" data-action="power-off" disabled data-i18n="device.powerOff">电源关</button>
+                                    </div>
+                                </div>
                                 <div class="device-preview__tools">
-                                    <button id="btnDeviceTools" class="dp-btn"><span data-i18n="device.tools">工具</span>▾</button>
+                                    <button id="btnDeviceTools" class="dp-btn"><span data-i18n="device.tools">工具</span><span class="dp-btn__arrow">▾</span></button>
                                     <div id="deviceToolsMenu" class="device-tools-menu" hidden>
                                         <button class="device-tools-menu__item" data-tool="crop-copy" data-tooltip="tooltip.cropCopy" data-i18n="device.cropCopy" disabled>裁剪复制</button>
                                         <button class="device-tools-menu__item" data-tool="image-match" data-tooltip="tooltip.imageMatch" data-i18n="device.imageMatch" disabled>图像匹配</button>

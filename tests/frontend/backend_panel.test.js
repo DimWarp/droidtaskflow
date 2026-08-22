@@ -116,8 +116,7 @@ describe('backend-panel: clicking backend row', () => {
 
         // 拿到 initBackendsPanel → restoreBackends 自动创建的 client,手动把它标 connected
         const cli1 = bp.getClientById(id);
-        cli1._state = 'connected';
-        cli1._emit('state', 'connected');
+        cli1._setState('connected');
 
         // 点击 backend row → setSelectedBackendId + setDevicePreviewClient(cli1) + setActiveSerial
         document.querySelector('.backend-item').click();
@@ -134,8 +133,7 @@ describe('backend-panel: clicking backend row', () => {
         // 新 client 也变 connected — 修复前 device-preview 还引用 cli1(state='disconnected'),
         // 按钮永远 disabled;修复后 setDevicePreviewClient(cli2) 让 device-preview 订阅 cli2,
         // cli2._emit('state','connected') 后按钮重新 enable
-        cli2._state = 'connected';
-        cli2._emit('state', 'connected');
+        cli2._setState('connected');
         expect(document.getElementById('btnDeviceScreenshot').disabled).toBe(false);
     });
 

@@ -27,8 +27,9 @@ export function initDevicePreview() {
     // 按钮 click handlers（截图 / 上传截图；选点按钮已移除，picker 默认开启，渲染 canvas 时自动 attachPicker）
     document.getElementById('btnDeviceScreenshot').addEventListener('click', onScreenshotClick);
     document.getElementById('btnDeviceOpenImage').addEventListener('click', onOpenImageClick);
-    document.getElementById('btnDeviceClear').addEventListener('click', onClearClick);
-    // OCR 已移入"工具"下拉菜单（按钮 id 保留，syncToolMenuItems 统一管理菜单项 disabled 态）
+    // "清空"已移入"操作"下拉菜单；菜单 dispatcher 统一调用 onClearClick
+    _initActionsMenu();
+    // OCR / 图像匹配 / 裁剪复制仍在"工具"下拉；syncToolMenuItems 统一管理 disabled 态
     _initToolsMenu();
     // infobar 第一行：点击 X / Y / HEX 复制到剪贴板 + toast 提示
     document.getElementById('devicePreviewInfobar').addEventListener('click', onInfobarClick);
@@ -42,7 +43,7 @@ export function initDevicePreview() {
     });
     // 截图按钮初始 disabled（无选中设备）
     syncScreenshotButton();
-    syncClearButton();
+    syncActionsMenu();
     syncToolMenuItems();
     // 初始化 infobar 显示（让 UI 跟 state 同步,即便没 picker 历史点也能看到 "—"）
     updateInfobar();
@@ -109,11 +110,30 @@ function _wireClient(client) {
         syncScreenshotButton();
         syncToolMenuItems();
     });
+    // M7: 幂等电源开关 reply → applied=true 静默；applied=false 提示"已是目标状态"。
+    // 用覆盖式 setDevicePowerHandler（不是 client.on('device_power', ...)）——
+    // 后者是 push 模式，多次切换 client 后 listener 累积导致一次 reply 弹多次 toast。
+    if (typeof client.setDevicePowerHandler === 'function') {
+        client.setDevicePowerHandler((msg) => {
+            if (!msg || msg.ok !== true) {
+                toast(t('device.powerFail') + (msg && msg.error ? ': ' + msg.error : ''));
+                return;
+            }
+            // applied=false 表示幂等跳过（后端查到屏幕已是目标状态，没按 keyevent）
+            if (msg.applied === false) {
+                const key = msg.action === 'on' ? 'device.powerAlreadyOn' : 'device.powerAlreadyOff';
+                toast(t(key));
+            }
+            // applied=true 不弹 toast（操作成功，无需打扰）
+        });
+    }
     // client state 变化（disconnected/connecting/connected）时刷新截图按钮 + 工具菜单禁用态
-    if (typeof client.on === 'function') {
-        client.on('state', () => {
+    // 同样用覆盖式 API（on('state', ...) 是 push，多次 _wireClient 会累积 state listener）。
+    if (typeof client.setStateHandler === 'function') {
+        client.setStateHandler(() => {
             syncScreenshotButton();
             syncToolMenuItems();
+            syncActionsMenu();   // 电源开/关依赖 backend connected
         });
     }
 }
@@ -150,10 +170,24 @@ function showError(message) {
     toast(message);
 }
 
-function syncClearButton() {
-    const btn = document.getElementById('btnDeviceClear');
-    if (!btn) return;
-    btn.disabled = !state.devicePreview.source;
+function syncActionsMenu() {
+    // 操作下拉菜单项的 disabled 态：
+    //   clear          — 只需预览图（无图时禁用）
+    //   power-on/off   — 需后端已连接 + 选中设备（不发预览图，所以跟 OCR/图像匹配同档）
+    const menu = document.getElementById('deviceActionsMenu');
+    if (!menu) return;
+    const hasImage = !!state.devicePreview.source;
+    const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
+    const backendReady = !!(client && client.state === 'connected');
+    const hasDevice = !!state.devicePreview.serial;
+    for (const item of menu.querySelectorAll('.device-tools-menu__item')) {
+        const action = item.dataset.action;
+        if (action === 'clear') {
+            item.disabled = !hasImage;
+        } else if (action === 'power-on' || action === 'power-off') {
+            item.disabled = !(backendReady && hasDevice);
+        }
+    }
 }
 
 function syncToolMenuItems() {
@@ -209,7 +243,7 @@ function onClearClick() {
     // 重建两行 span(直接 bar.textContent 会删掉 devicePreviewInfobarPick/Hover
     // 两个子 div,之后任何 updateInfobar 都因 getElementById 返回 null 失效)
     updateInfobar();
-    syncClearButton();
+    syncActionsMenu();
     syncToolMenuItems();
 }
 
@@ -305,7 +339,7 @@ function renderStage(blob, width, height) {
 
     // picker 默认开启 — 渲染图片即挂 click handler,直接点预览画面就选点
     attachPicker(canvas);
-    syncClearButton();
+    syncActionsMenu();
     syncToolMenuItems();
     removeOCRBoxes();
     _removeMatchBoxes();
@@ -889,19 +923,21 @@ async function copyToClipboard(text) {
 
 function _initToolsMenu() {
     const toolsBtn = document.getElementById('btnDeviceTools');
+    const arrow = toolsBtn && toolsBtn.querySelector('.dp-btn__arrow');
     const menu = document.getElementById('deviceToolsMenu');
-    if (!toolsBtn || !menu) return;
+    if (!toolsBtn || !arrow || !menu) return;
 
+    const setArrow = (open) => { arrow.textContent = open ? '▴' : '▾'; };
     const hide = () => {
         menu.hidden = true;
         toolsBtn.classList.remove('dp-btn--active');
-        toolsBtn.textContent = t('device.tools') + '▾';
+        setArrow(false);
     };
     const toggle = () => {
         const show = menu.hidden;
         menu.hidden = !show;
         toolsBtn.classList.toggle('dp-btn--active', show);
-        toolsBtn.textContent = show ? t('device.tools') + '▴' : t('device.tools') + '▾';
+        setArrow(show);
     };
 
     toolsBtn.addEventListener('click', (e) => {
@@ -927,6 +963,89 @@ function _initToolsMenu() {
     document.addEventListener('mousedown', (e) => {
         if (menu.hidden) return;
         if (menu.contains(e.target) || e.target === toolsBtn) return;
+        hide();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !menu.hidden) hide();
+    });
+}
+
+// ── 操作下拉菜单 ────────────────────────────────────────────────────
+// 发送设备按键（keycode=26=POWER 等）：通过 BackendClient.requestDeviceKeyevent，
+// 未连接 / 缺设备 → 返回 false 让 caller 弹 toast。
+function _sendDeviceKeyevent(keycode) {
+    const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
+    if (!client || client.state !== 'connected') return false;
+    const serial = state.devicePreview.serial;
+    if (!serial) return false;
+    return client.requestDeviceKeyevent(serial, keycode);
+}
+
+// M7: 幂等电源开关。后端先查屏幕状态再决定是否按 POWER keyevent，返回 {ok, applied}
+//   applied=false 表示幂等跳过（已是目标状态），applied=true 表示实际按了 key。
+// reply 通过 client.on('device_power', ...) 异步回传，调用方自行监听处理 toast。
+function _sendDevicePower(action) {
+    const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
+    if (!client || client.state !== 'connected') {
+        toast(t('device.powerFail') + ': ' + t('device.keyeventFail'));
+        return false;
+    }
+    const serial = state.devicePreview.serial;
+    if (!serial) {
+        toast(t('device.powerFail') + ': ' + t('device.keyeventFail'));
+        return false;
+    }
+    return client.requestDevicePower(serial, action);
+}
+
+// "操作"按钮展开一个下拉，容纳清空 / 电源开 / 电源关。
+// 以后加操作只需在 HTML 的 #deviceActionsMenu 里加一个 <button data-action="...">，
+// 并在这里的 dispatch + syncActionsMenu 加一个分支。
+// 与"工具"下拉互斥关闭（document mousedown listener 会同时关掉两个）。
+
+function _initActionsMenu() {
+    const actionsBtn = document.getElementById('btnDeviceActions');
+    const arrow = actionsBtn && actionsBtn.querySelector('.dp-btn__arrow');
+    const menu = document.getElementById('deviceActionsMenu');
+    if (!actionsBtn || !arrow || !menu) return;
+
+    const setArrow = (open) => { arrow.textContent = open ? '▴' : '▾'; };
+    const hide = () => {
+        menu.hidden = true;
+        actionsBtn.classList.remove('dp-btn--active');
+        setArrow(false);
+    };
+    const toggle = () => {
+        const show = menu.hidden;
+        menu.hidden = !show;
+        actionsBtn.classList.toggle('dp-btn--active', show);
+        setArrow(show);
+    };
+
+    actionsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggle();
+    });
+
+    // 菜单项点击 → 清空 / 电源开 / 电源关（幂等：后端查屏幕状态再决定是否按 POWER）
+    menu.addEventListener('click', (e) => {
+        const item = e.target.closest('.device-tools-menu__item');
+        if (!item || item.disabled) return;
+        hide();
+        const action = item.dataset.action;
+        if (action === 'clear') {
+            onClearClick();
+        } else if (action === 'power-on') {
+            _sendDevicePower('on');
+        } else if (action === 'power-off') {
+            _sendDevicePower('off');
+        }
+    });
+
+    // 点击菜单外部 / Esc 关闭
+    document.addEventListener('mousedown', (e) => {
+        if (menu.hidden) return;
+        if (menu.contains(e.target) || e.target === actionsBtn) return;
         hide();
     });
     document.addEventListener('keydown', (e) => {

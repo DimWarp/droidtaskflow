@@ -22,6 +22,7 @@ const MSG = {
   REMOVE: 'automation_task_remove',
   ENABLE: 'automation_task_enable',
   RUN_NOW: 'automation_run_now',
+  CANCEL: 'automation_cancel',
   HISTORY_REQ: 'automation_history_req',
   TASK_LIST: 'automation_task_list',
   TASK_ADDED: 'automation_task_added',
@@ -167,6 +168,18 @@ function _onMessage(msg) {
     case MSG.EXIT:
       _activeRuns.delete(msg.run_id);
       _queuedRuns.delete(msg.run_id);
+      // EXIT 消息自带 status 字段（后端在推 EXIT 时已确定结果），先把这条记录
+      // 同步插入 _history（最新在前），renderTasks 立即拿到新值；后续 refreshHistory
+      // 响应（带完整 log_path / duration_ms）回来时再整体替换 _history（不会重复，
+      // 因为同一 run_id 在响应里也只有一条）。
+      // 不这么改的话：refreshHistory 是异步的，renderTasks 用的是 EXIT 之前的旧 _history，
+      // 卡片显示"上次成功"——如果 history_list 响应丢失/延迟，用户一直看不到失败。
+      if (msg.status && msg.run_id) {
+        const idx = _history.findIndex(r => r.run_id === msg.run_id);
+        const record = { run_id: msg.run_id, task_id: msg.task_id, status: msg.status };
+        if (idx >= 0) _history[idx] = { ..._history[idx], ...record };
+        else _history.unshift(record);
+      }
       refreshHistory();
       // 历史弹窗开着且是本任务 → 顺带刷新弹窗数据
       if (_historyDialogTaskId && _historyDialogTaskId === msg.task_id) refreshHistory(_historyDialogTaskId);
@@ -368,7 +381,7 @@ function _buildTaskCard(task) {
       ${running ? `<span class="automation__result automation__result--running">● ${t('automation.statusRunning')}</span>` : lastTxt}
     </div>
     <div class="automation__task-actions">
-      <button class="automation__btn" data-act="run" ${(running || queued) ? 'disabled' : ''}>${t('automation.runNow')}</button>
+      <button class="automation__btn" data-act="run">${(running || queued) ? t('automation.cancel') : t('automation.runNow')}</button>
       <button class="automation__btn" data-act="history">${t('automation.history')}</button>
       <button class="automation__btn" data-act="edit">${t('automation.edit')}</button>
       <button class="automation__btn automation__btn--danger" data-act="remove" ${(running || queued) ? 'disabled' : ''}>${t('automation.delete')}</button>
@@ -377,7 +390,11 @@ function _buildTaskCard(task) {
   card.querySelector('[data-act="enable"]').addEventListener('change', (e) => {
     setEnabled(task.id, e.target.checked);
   });
-  card.querySelector('[data-act="run"]').addEventListener('click', () => runNow(task.id));
+  card.querySelector('[data-act="run"]').addEventListener('click', () => {
+    // 运行中/排队中 → 按钮变成"取消"：运行中后端停止该任务，排队中从队列移除
+    if (taskHasActiveRun(task.id) || taskHasQueuedRun(task.id)) cancelTask(task.id);
+    else runNow(task.id);
+  });
   card.querySelector('[data-act="history"]').addEventListener('click', () => openHistoryDialog(task.id, task.name));
   card.querySelector('[data-act="edit"]').addEventListener('click', () => openEditor(task));
   card.querySelector('[data-act="remove"]').addEventListener('click', () => confirmDeleteTask(task.id, task.name));
@@ -639,6 +656,14 @@ function runNow(taskId) {
   if (!cli || cli.state !== 'connected') { toast(t('automation.needBackend')); return; }
   cli.sendRaw({ type: MSG.RUN_NOW, task_id: taskId });
   toast(t('automation.runQueued'));
+}
+
+function cancelTask(taskId) {
+  // 运行中 → 后端停止该任务；排队中 → 从队列移除（后端按 task_id 统一处理）
+  const cli = _getClient();
+  if (!cli || cli.state !== 'connected') { toast(t('automation.needBackend')); return; }
+  cli.sendRaw({ type: MSG.CANCEL, task_id: taskId });
+  toast(t('automation.cancelSent'));
 }
 
 function setEnabled(taskId, enabled) {

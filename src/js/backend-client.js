@@ -15,6 +15,12 @@ const MSG_DEVICE_SCAN_REPLY = 'device_scan_req:reply';
 // M2: device screenshot
 const MSG_DEVICE_SCREENSHOT_REQ = 'device_screenshot_req';
 const MSG_DEVICE_SCREENSHOT = 'device_screenshot';
+// M6: device keyevent
+const MSG_DEVICE_KEYEVENT_REQ = 'device_keyevent_req';
+const MSG_DEVICE_KEYEVENT_REPLY = 'device_keyevent_req:reply';
+// M7: device power (幂等)
+const MSG_DEVICE_POWER_REQ = 'device_power_req';
+const MSG_DEVICE_POWER_REPLY = 'device_power_req:reply';
 const MSG_LOG = 'log';
 const MSG_EXIT = 'exit';
 const MSG_ERROR = 'error';
@@ -177,6 +183,42 @@ export class BackendClient {
   setDeviceScreenshotHandler(fn) { this._onDeviceScreenshot = fn; }
   setDeviceScreenshotErrorHandler(fn) { this._onDeviceScreenshotError = fn; }
 
+  // M7: 幂等电源开关 reply 回调（device-preview.js）。覆盖式以避免多次切换 client 时
+  // _wireClient 重复 push listener 导致一次 reply 触发多次 toast。
+  setDevicePowerHandler(fn) { this._onDevicePower = fn; }
+
+  // 覆盖式 state 回调（替代 client.on('state', ...) push 模式——后者多次 _wireClient 后
+  // listener 累积导致一个状态变化触发 N 次回调）。
+  setStateHandler(fn) { this._onState = fn; }
+
+  // M6: 通用设备按键（电源开/关等都通过通用 keycode 发，行为由设备系统决定）
+  requestDeviceKeyevent(serial, keycode) {
+    if (this._state !== 'connected' || !serial) return false;
+    try {
+      this._ws.send(JSON.stringify({
+        type: MSG_DEVICE_KEYEVENT_REQ,
+        serial,
+        keycode,
+      }));
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // M7: 幂等的电源开关（action='on'/'off'）。后端先查屏幕状态再决定是否按 POWER keyevent，
+  // 返回 reply {ok, applied}：applied=false 表示幂等跳过（已是目标状态）。
+  requestDevicePower(serial, action) {
+    if (this._state !== 'connected' || !serial) return false;
+    if (action !== 'on' && action !== 'off') return false;
+    try {
+      this._ws.send(JSON.stringify({
+        type: MSG_DEVICE_POWER_REQ,
+        serial,
+        action,
+      }));
+      return true;
+    } catch (_) { return false; }
+  }
+
   // M2: 设置 inflightSerial / fetching（device-preview 调用）
   _markScreenshotInflight(serial) {
     // 通过自定义事件让 device-preview 同步它自己的 state
@@ -188,6 +230,7 @@ export class BackendClient {
   _setState(s) {
     if (this._state === s) return;
     this._state = s;
+    if (this._onState) this._onState(s);
     this._emit('state', s);
   }
 
@@ -257,6 +300,12 @@ export class BackendClient {
         const act = msg.activity || '';
         state.devicePreview.foregroundApp = (pkg && act) ? `${pkg}/${act}` : pkg || '';
         this._onDeviceScreenshot({ serial: msg.serial, blob, width: msg.width, height: msg.height });
+        break;
+      case MSG_DEVICE_POWER_REPLY:
+        // 幂等电源开关结果：{ok, applied, action}。applied=false 表示幂等跳过。
+        // 走 setDevicePowerHandler 覆盖式回调（不是 emit('device_power', ...)），
+        // 避免多次 _wireClient 后 listener 累积导致一次 reply 多次 toast。
+        if (this._onDevicePower) this._onDevicePower(msg);
         break;
       default:
         // M5: 自动化消息统一透传给 'automation' 监听者（automation-panel 订阅）
