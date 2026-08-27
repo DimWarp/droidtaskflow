@@ -2063,14 +2063,16 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     animation: btn-spin 0.6s linear infinite;
 }
 
-/* 静态悬浮提示（tooltip.js）：跟随主题、延迟显示、淡入；只响应鼠标 */
+/* 静态悬浮提示（tooltip.js）：跟随主题、延迟显示、淡入；只响应鼠标。
+   z-index 必须 > .dlg-backdrop（1000），否则历史/编辑/确认弹窗打开时，弹窗遮罩
+   会盖住 tooltip（DOM 顺序后插入的胜出）。 */
 .app-tooltip {
     position: fixed; padding: 3px 7px;
     background: var(--surface); color: var(--on-surface);
     border: 1px solid var(--border); border-radius: var(--r-xs);
     font-family: var(--font-ui); font-size: 10px; line-height: 1.4;
     white-space: nowrap; opacity: 0; pointer-events: none;
-    transition: opacity 120ms ease; z-index: 1000;
+    transition: opacity 120ms ease; z-index: 1100;
     box-shadow: var(--el-2); display: none;
 }
 .app-tooltip--show { opacity: 1; }
@@ -2104,7 +2106,18 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
 .automation__task-name { font-weight: 600; font-size: 11px; color: var(--on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .automation__task-meta { font-size: 10px; color: var(--on-surface-mute); display: flex; gap: 6px; flex-wrap: wrap; }
 /* 下次运行靠左：与设备同排，从行首开始（不再 margin-left:auto 推到右缘） */
-.automation__task-status { font-size: 10px; min-height: 13px; }
+.automation__task-status { font-size: 10px; min-height: 13px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+/* 卡片状态行的"信息"段：脚本通过 [droidtaskflow job exit] 行输出的 exit_msg。
+   截断 40 字符后省略号显示，title tooltip 鼠标 hover 看完整内容。
+   margin-left:auto 让 msg 推到行右（与之前"成功失败徽标在左、信息在右"布局一致）。 */
+/* 卡片上"信息"段：margin-left:auto 推到行右，颜色继承 .automation__task-meta
+   的 --on-surface-mute（与设备/时间等元数据行一致）。 */
+.automation__task-msg {
+    margin-left: auto;
+    font-size: 10px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 60%;
+}
 .automation__task-actions { display: flex; gap: 3px; }
 /* 四个按钮等宽占满整行。min-width:0 + 省略号：侧栏出现滚动条挤窄卡片时
    按钮可收缩，英文长标签（History 等）放不下则省略号，绝不超出卡片右缘 */
@@ -2117,6 +2130,14 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     border: 1px solid var(--border); background: var(--surface);
     color: var(--on-surface-mute); cursor: pointer;
     transition: background 120ms, color 120ms, border-color 120ms;
+}
+/* 用 :focus-visible 而非 :focus：
+   - 键盘 Tab 时显示焦点环（无障碍可达性，键盘用户能看到焦点位置）
+   - 鼠标点击触发弹框再 Esc 关闭时**不显示**（避免"黑框包裹"视觉噪音） */
+.automation__btn:focus { outline: none; }
+.automation__btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 .automation__btn:hover { background: var(--surface-mid); color: var(--on-surface); }
 .automation__btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -2165,8 +2186,8 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
 .automation__hist-time { white-space: nowrap; }
 .automation__hist-dur { white-space: nowrap; color: var(--on-surface-mute); }
 /* 运行历史弹窗（入口：每任务卡片"立即运行 / 历史 / 编辑"之间） */
-.automation-hist { width: 510px; }   /* 历史弹窗加宽至 1.5×（340px） */
-/* 历史弹窗列名行：与数据行同列宽（状态/设备/时间/耗时），下方细线分隔 */
+.automation-hist { width: 600px; }   /* 历史弹窗加宽（多了"信息"列 → 510px 不够） */
+/* 历史弹窗列名行：与数据行同列宽（状态/设备/信息/时间/耗时），下方细线分隔 */
 .automation-hist__head {
     display: flex; gap: 4px; align-items: center;
     font-size: 10px; font-weight: 500; color: var(--on-surface-mute);
@@ -2178,16 +2199,19 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     max-height: 50vh; overflow-y: auto;
 }
 .automation-hist .automation__hist-item { font-size: 11px; }
-/* 历史弹窗五列对齐：状态定宽 / 设备弹性省略 / 时间定宽 / 耗时右对齐 / 操作（查看日志）列。
-   分配（510px 弹窗）：状态 46 / 设备弹性（保底 90）/ 时间 115 / 耗时 65 / 操作按钮 58 */
+/* 历史弹窗六列对齐：状态定宽 / 设备弹性省略 / 信息弹性省略 / 时间定宽 / 耗时 / 操作列。
+   分配（600px 弹窗）：状态 46 / 设备(min 80) / 信息(min 100) / 时间 135 / 耗时 55 / 操作 56 */
 .automation-hist .automation__hist-status { flex: 0 0 46px; white-space: nowrap; }
-.automation-hist .automation__hist-dev { flex: 1; min-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automation-hist .automation__hist-dev { flex: 1 1 80px; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* "信息"列：弹窗里也展示 exit_msg，鼠标 hover 看完整内容（title 由 frontend 设置）。
+   颜色继承父级 .automation__hist-item 的 --on-surface-mute，与设备/时间列一致。 */
+.automation-hist .automation__hist-msg { flex: 1 1 100px; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-hist .automation__hist-time { flex: 0 0 135px; white-space: nowrap; }
 /* 耗时：左对齐，与表头"耗时"字符开头对齐（不右对齐） */
-.automation-hist .automation__hist-dur { flex: 0 0 65px; white-space: nowrap; }
-.automation-hist .automation__hist-log { flex: 0 0 62px; }   /* 表头占位列（图标按钮列） */
+.automation-hist .automation__hist-dur { flex: 0 0 55px; white-space: nowrap; }
+.automation-hist .automation__hist-log { flex: 0 0 56px; }   /* 表头占位列（图标按钮列） */
 .automation-hist .automation__hist-actions {
-    flex: 0 0 62px; display: flex; gap: 4px; align-items: center;
+    flex: 0 0 56px; display: flex; gap: 4px; align-items: center;
 }
 .automation-hist .automation__hist-icon {
     width: 20px; height: 20px; flex: none; padding: 0; line-height: 1;

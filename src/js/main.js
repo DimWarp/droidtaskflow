@@ -20,6 +20,7 @@ import { initAutomationPanel } from './automation-panel.js';
 import { render } from './render.js';
 import { renderGlobalVars } from './global-vars.js';
 import { refreshProjectList } from './sidebar.js';
+import { disableButtonTabIndex } from './focus-utils.js';
 
 // Guard against accidental refresh when project is unsaved or in temp mode
 window.addEventListener('beforeunload', e => {
@@ -96,6 +97,13 @@ function _bootstrap() {
     if (consolePane) initConsolePanel(consolePane);
     const btnRun = document.getElementById('btnRun');
     if (btnRun) btnRun.onclick = onRunClick;
+
+    // 默认禁用 button 键盘 Tab：除显式声明 tabindex="0" 的 button 外，全部 tabindex=-1。
+    // 用户意图：Tab 只在输入框之间切换，不在按钮之间切换。鼠标点击 + Esc 关闭弹框的视觉噪音
+    // 也跟着消失（按钮不可达就不会被 focus → 不会显示 focus-visible 焦点环）。
+    // 动态新增的 button 也走 MutationObserver 自动加 tabindex=-1（见 focus-utils.js）。
+    // 注意：这是 WAI-ARIA 反模式（交互元素应键盘可达），用户明确要求时再开。
+    disableButtonTabIndex();
 
     // 语言：模块内 _currentLang 已按浏览器语言初始化（defaultLang）。
     // 统一走 setLang → 设置 #btnLang 文本 + html lang + applyLanguage() → 刷新钩子。

@@ -43,6 +43,21 @@ def read_global_var(var_name, global_vars=None):
         return [{"enable": False, "value": None}]
     return [{"enable": True, "value": global_vars[var_name]}]
 
+@info_task("iterate_global_list", alias="iterate global list",
+    params={
+        "list_name": {"type": "global_var", "ui_width": 0.5, "init_value": ""},
+        "index": {"type": "global_var", "ui_width": 0.5, "init_value": ""},
+    },
+    rets=["value"])
+def iterate_global_list(list_name, index, global_vars=None):
+    if not list_name or global_vars is None or list_name not in global_vars or index is None or index not in global_vars:
+        return [{"enable": False, "value": None}]
+    if len(global_vars[list_name]) <= int(global_vars[index]):
+        return [{"enable": False, "value": None}]
+    value = global_vars[list_name][int(global_vars[index])]
+    global_vars[index] = int(global_vars[index]) + 1
+    return [{"enable": True, "value": value}]
+
 # ═══════════════════════════════════════════════
 #  LOGIC — 逻辑分析
 # ═══════════════════════════════════════════════
@@ -135,12 +150,15 @@ def find_button_in_ocr(ocr_text, ocr_box, text):
 @logic_task("custom_code", alias="custom code",
     params={
         "input": {"type": "line", "ui_width": 1},
-        "code": {"type": "code", "ui_width": 1, "init_value": "print(input)\nprint(output)"},
+        "code": {"type": "code", "ui_width": 1, "init_value": "output = [{'enable': True, 'value': input}]"},
     },
     rets=["output"])
 def custom_code(input, code):
-    output = [{"enable": True, "value": None}]
-    exec(code)
+    # exec 必须用显式 dict 命名空间并读回：函数内裸 exec(code) 的赋值不会写局部变量槽
+    # （CPython LOAD_FAST 行为），用户写 `output = [...]` 永远不生效、返回初始值。
+    _locals = {'input': input}
+    exec(code, globals(), _locals)
+    output = _locals.get('output', {'enable': False, 'value': None})
     return output
 
 @logic_task("math_calculate", alias="math calculate",
@@ -207,38 +225,6 @@ def math_compare(input, operator=">", value=0):
 #  OPERATE — 操作
 # ═══════════════════════════════════════════════
 
-@operate_task("set_global_var", alias="set global var",
-    params={
-        "glo_var": {"type": "global_var", "ui_width": 0.5, "init_value": ""},
-        "value": {"type": "both", "ui_width": 0.5, "init_value": ""},
-    },
-    rets=["new_value"])
-def set_global_var(glo_var, value, global_vars=None):
-    if not glo_var or global_vars is None:
-        return [{"enable": False, "value": None}]
-    global_vars[glo_var] = value
-    return [{"enable": True, "value": value}]
-
-@operate_task("operate_print", alias="operate print",
-    params={
-        "input": {"type": "line", "ui_width": 0, "init_value": ""},
-        "remark": {"type": "box", "ui_width": 1, "init_value": " ← value of input"}
-    },
-    rets=[])
-def operate_print(input, remark, task_alias=None):
-    if input is None:
-        input = ""
-    print(task_alias + ": " + str(input) + remark)
-
-@operate_task("sleep", alias="sleep",
-    params={
-        "millisecond": {"type": "box", "ui_width": 1, "init_value": "100"},
-    },
-    rets=[])
-def sleep(millisecond):
-    import time
-    time.sleep(int(millisecond) / 1000)
-
 @operate_task("adb_power_on", alias="power on",
     params={},
     rets=[])
@@ -289,6 +275,38 @@ def adb_unlock():
 def adb_back():
     adb_tool.press_key(adb_tool.KEY['BACK'])
 
+@operate_task("sleep", alias="sleep",
+    params={
+        "millisecond": {"type": "box", "ui_width": 1, "init_value": "100"},
+    },
+    rets=[])
+def sleep(millisecond):
+    import time
+    time.sleep(int(millisecond) / 1000)
+
+@operate_task("set_global_var", alias="set global var",
+    params={
+        "glo_var": {"type": "global_var", "ui_width": 0.5, "init_value": ""},
+        "value": {"type": "both", "ui_width": 0.5, "init_value": ""},
+    },
+    rets=["new_value"])
+def set_global_var(glo_var, value, global_vars=None):
+    if not glo_var or global_vars is None:
+        return [{"enable": False, "value": None}]
+    global_vars[glo_var] = value
+    return [{"enable": True, "value": value}]
+
+@operate_task("operate_print", alias="operate print",
+    params={
+        "input": {"type": "line", "ui_width": 0, "init_value": ""},
+        "remark": {"type": "box", "ui_width": 1, "init_value": " ← value of input"}
+    },
+    rets=[])
+def operate_print(input, remark, task_alias=None):
+    if input is None:
+        input = ""
+    print(task_alias + ": " + str(input) + remark)
+
 @operate_task("adb_swipe", alias="swipe",
     params={
         "x1": {"type": "both", "ui_width": 0.5, "init_value": 540},
@@ -318,6 +336,20 @@ def adb_tap(x, y):
 def adb_tap_offset(x, y, x_offset=0, y_offset=0):
     adb_tool.tap(x + int(x_offset), y + int(y_offset))
 
+@operate_task("adb_input_text", alias="input text",
+    params={
+        "text": {"type": "line", "ui_width": 1, "init_value": ""},
+    })
+def adb_input_text(text):
+    """输入文本（支持中文）。
+
+    前置逻辑：确保设备装有 ADBKeyboard（com.android.adbkeyboard）——未安装则从
+    官方源下载（失败/超时自动换备用源）并安装、启用切换输入法；然后通过
+    ADBKeyboard 广播输入，支持 UTF-8 中文。
+    """
+    adb_tool.ensure_adbkeyboard()
+    adb_tool.input_text_unicode(text)
+
 @operate_task("adb_start_app", alias="start app",
     params={
         "package": {"type": "both", "ui_width": 1, "init_value": "com.example.app"},
@@ -331,3 +363,53 @@ def adb_start_app(package):
     })
 def adb_stop_app(package):
     adb_tool.stop_app(package)
+
+# press key：下拉放常用的 Android 按键码（adb_tool.KEY 的键名），函数直接转换
+_PRESS_KEYS = ["POWER", "BACK", "HOME", "MENU", "VOLUME_UP", "VOLUME_DOWN",
+               "ENTER", "DEL", "SPACE", "TAB", "DPAD_UP", "DPAD_DOWN",
+               "DPAD_LEFT", "DPAD_RIGHT", "DPAD_CENTER", "SEARCH",
+               "MEDIA_PLAY_PAUSE", "CAMERA"]
+
+@operate_task("adb_press_key", alias="press key",
+    params={
+        "key": {"type": "list", "ui_width": 1, "init_value": "POWER",
+                "opts": _PRESS_KEYS},
+    })
+def adb_press_key(key):
+    """按下指定按键（adb_tool.KEY 的键名 → keycode）。"""
+    if key in adb_tool.KEY:
+        adb_tool.press_key(adb_tool.KEY[key])
+
+# ── 退出带状态：让脚本"控制自己的成功/失败 + 信息" ────────────────────────────
+# 这是 operate 卡片的退出机制约定——按固定格式 print 一行后 sys.exit()：
+#   [droidtaskflow job exit] exit code: <X> - <status>, message: <msg>
+# 后端 _extract_exit_msg 正则匹配，存到 history.json 的 exit_msg 字段；
+# 前端在自动化卡片 + 历史弹窗的"信息"列展示。
+#
+# 状态码语义：
+#   0  → 外部判定 success（沿用 process exit code 习惯）
+#   59 → 外部判定 failed（自定义失败码；后端只看 "code != 0" 走 failed 路径）
+#
+# 第一次调用此卡片脚本立即退出（业务约束，不可恢复）。后续节点不再执行。
+
+@operate_task("exit_with_status", alias="exit with status",
+    params={
+        "status": {"type": "list", "ui_width": 0.4, "init_value": "success",
+                   "opts": ["success", "failed"]},
+        "msg": {"type": "box", "ui_width": 0.6, "init_value": ""},
+    })
+def exit_with_status(status="success", msg=""):
+    """脚本按 status + msg 退出。后端从 stdout 抓取并写入 history.exit_msg。
+
+    success → exit code 0；failed → exit code 59。后端统一把 "code != 0" 判 failed，
+    把 "code == 0" 判 success（与现有 process exit code 习惯一致）。
+    """
+    import sys
+    if status == "failed":
+        code, status_str = 59, "failed"
+    else:
+        code, status_str = 0, "success"
+    # 单行 print：后端正则 `\[droidtaskflow job exit\] exit code: (\d+) - (\w+), message: (.+)`
+    # 匹配后取 code → 决定 status enum；取 msg → 存 exit_msg 字段。
+    print(f"[droidtaskflow job exit] exit code: {code} - {status_str}, message: {msg}")
+    sys.exit(code)

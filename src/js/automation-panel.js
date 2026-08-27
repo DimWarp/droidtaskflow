@@ -14,6 +14,7 @@ import { t, onLanguageChange } from './i18n.js';
 import { getDirHandle, listProjectFiles, getProjectName, readProjectSource } from './filesystem.js';
 import { parseAnsi } from './console-panel.js';
 import { createCopyMenu } from './copy-menu.js';
+import { showTooltip, hideTooltip } from './tooltip.js';
 
 const MSG = {
   LIST_REQ: 'automation_task_list_req',
@@ -79,6 +80,18 @@ let _saveSeq = 0;              // 本会话内保存请求递增序号
 export function initAutomationPanel() {
   const btn = document.getElementById('btnAddAutomationTask');
   if (btn) btn.addEventListener('click', () => openEditor(null));
+
+  // 全局委托：自动化卡片 + 历史弹窗的 exit_msg 元素悬浮提示走项目 tooltip 系统
+  // （共用 .app-tooltip 气泡样式/位置逻辑），不用原生 title（浏览器强制样式不可控）。
+  // 后端返回的 msg 是动态字符串，没法走 data-tooltip+i18n key，所以手动 hook mouseenter/leave。
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest && e.target.closest('.automation__task-msg[data-msg], .automation__hist-msg[data-msg]');
+    if (el) showTooltip(el, el.dataset.msg);
+  });
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest && e.target.closest('.automation__task-msg[data-msg], .automation__hist-msg[data-msg]');
+    if (el && !(e.relatedTarget && el.contains(e.relatedTarget))) hideTooltip();
+  });
 
   // 后端连接建立 → 拉任务 + 历史快照；切换选中后端 → 重估可用性 + 刷新
   window.addEventListener('dtf:backend-connected', refreshAll);
@@ -359,6 +372,14 @@ function _buildTaskCard(task) {
   const lastTxt = last
     ? `<span class="automation__result automation__result--${last.status}">${t(STATUS_KEYS[last.status] || 'automation.statusFailed')}</span>`
     : '';
+  // exit_msg：脚本通过 [droidtaskflow job exit] 行输出的自定义退出信息。
+  // 多设备时后端聚合已选首个 failed 的 msg。无 msg 时不渲染这段。
+  // 用 data-msg 属性存全文（避免原生 title 的样式不可控），悬浮由全局 mouseover 委托
+  // 触发项目 .app-tooltip 系统（见 initAutomationPanel）。
+  const lastMsg = (last && last.exit_msg) ? last.exit_msg : '';
+  const lastMsgHtml = lastMsg
+    ? `<span class="automation__task-msg" data-msg="${escapeHtml(lastMsg)}">${escapeHtml(_truncate(lastMsg, 40))}</span>`
+    : '';
   const next = nextFireTime(task.schedule, new Date());
 
   card.innerHTML = `
@@ -379,6 +400,7 @@ function _buildTaskCard(task) {
     <div class="automation__task-status">
       ${queued ? `<span class="automation__result automation__result--queued">● ${t('automation.statusQueued')}</span>` : ''}
       ${running ? `<span class="automation__result automation__result--running">● ${t('automation.statusRunning')}</span>` : lastTxt}
+      ${last ? lastMsgHtml : ''}
     </div>
     <div class="automation__task-actions">
       <button class="automation__btn" data-act="run">${(running || queued) ? t('automation.cancel') : t('automation.runNow')}</button>
@@ -415,6 +437,13 @@ function lastRunOf(taskId) {
   return _history.find(r => r.task_id === taskId && r.status !== 'running') || null;
 }
 
+// 把 str 截断到 max 字符内，超出加省略号。中文按字符计（与 byte 数不同），
+// 防止卡片/弹窗列被长 msg 撑爆。
+function _truncate(str, max) {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
+
 /** 任务目标设备列表。新格式用顶层 devices；兼容旧格式 vars.device_id（单串）。 */
 function devicesOf(task) {
   if (task && task.devices && task.devices.length) return task.devices;
@@ -443,6 +472,7 @@ function openHistoryDialog(taskId, taskName) {
         <div class="automation-hist__head">
           <span class="automation__hist-status">${t('automation.historyColStatus')}</span>
           <span class="automation__hist-dev">${t('automation.historyColDevice')}</span>
+          <span class="automation__hist-msg">${t('automation.historyColMsg')}</span>
           <span class="automation__hist-time">${t('automation.historyColTime')}</span>
           <span class="automation__hist-dur">${t('automation.historyColDuration')}</span>
           <span class="automation__hist-log">${t('automation.historyColAction')}</span>
@@ -483,6 +513,7 @@ function renderHistoryDialog() {
         <div class="automation__hist-item">
           <span class="automation__result automation__hist-status automation__result--${h.status}">${t(STATUS_KEYS[h.status] || h.status)}</span>
           <span class="automation__hist-dev">${escapeHtml(devs.join(', '))}</span>
+          <span class="automation__hist-msg" data-msg="${escapeHtml(h.exit_msg || '')}">${escapeHtml(_truncate(h.exit_msg || '', 50))}</span>
           <span class="automation__hist-time">${formatTime(new Date(h.started_at || h.ended_at))}</span>
           <span class="automation__hist-dur">${h.duration_ms != null ? (h.duration_ms / 1000).toFixed(1) + 's' : ''}</span>
           <span class="automation__hist-actions">

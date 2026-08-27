@@ -356,11 +356,11 @@ describe('多设备目标选择', () => {
       type: 'automation_history_list', task_id: 't1', total: 1,
       runs: [{ run_id: 'r1', task_id: 't1', status: 'success', device_id: 'S1', duration_ms: 1000 }],
     });
-    // 列名行存在且五列标签有文字（状态/设备/时间/耗时/操作，语言无关）
+    // 列名行存在且六列标签有文字（状态/设备/信息/时间/耗时/操作，语言无关）
     const head = document.querySelector('.automation-hist .automation-hist__head');
     expect(head).toBeTruthy();
     const headCells = [...head.children].map(s => s.textContent.trim()).filter(Boolean);
-    expect(headCells.length).toBe(5);
+    expect(headCells.length).toBe(6);
     headCells.forEach(txt => expect(txt.length).toBeGreaterThan(0));
     // 数据行里的设备号（列名行的 .__hist-dev 不算）
     const rowDev = document.querySelector('.automation-hist .automation-hist__list .automation__hist-dev');
@@ -1062,4 +1062,140 @@ describe('删除任务确认弹窗', () => {
     expect(sent.some(o => o.type === 'automation_task_remove')).toBe(false);
     expect(document.querySelector('.automation-confirm')).toBeFalsy();
   });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M7 exit_msg：脚本通过 stdout [droidtaskflow job exit] 行输出的信息
+// 前端在两道位置展示：自动化卡片 status 行右边 + 历史弹窗的"信息"列
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('M7 exit_msg 显示', () => {
+    beforeEach(() => {
+        __test.setTestClient(fakeClient());
+    });
+
+    it('卡片：上次结果含 exit_msg 时显示（status 旁右边 + tooltip 完整内容）', () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        __test.handleMessage({
+            type: 'automation_history_list',
+            runs: [{
+                run_id: 'r1', task_id: 't1', status: 'failed',
+                exit_msg: '打开 app 失败：com.example 不存在',
+            }],
+        });
+        const card = document.querySelector('.automation__task');
+        const msgEl = card.querySelector('.automation__task-msg');
+        expect(msgEl).toBeTruthy();
+        expect(msgEl.textContent).toContain('打开 app');
+        // tooltip 显示完整内容（含后段截断的字符）
+        expect(msgEl.getAttribute('data-msg')).toBe('打开 app 失败：com.example 不存在');
+    });
+
+    it('卡片：上次结果无 exit_msg 时不渲染 .automation__task-msg', () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        __test.handleMessage({
+            type: 'automation_history_list',
+            runs: [{ run_id: 'r1', task_id: 't1', status: 'success' }],
+        });
+        const card = document.querySelector('.automation__task');
+        expect(card.querySelector('.automation__task-msg')).toBeNull();
+    });
+
+    it('卡片：exit_msg 超长时截断 + tooltip 完整', () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        __test.handleMessage({
+            type: 'automation_history_list',
+            runs: [{
+                run_id: 'r1', task_id: 't1', status: 'failed',
+                exit_msg: 'A'.repeat(80),  // 80 字符 > 40 截断
+            }],
+        });
+        const msgEl = document.querySelector('.automation__task-msg');
+        expect(msgEl.textContent.length).toBeLessThanOrEqual(40);
+        // 末位应该是省略号 …
+        expect(msgEl.textContent.endsWith('…')).toBe(true);
+        // tooltip 完整
+        expect(msgEl.getAttribute('data-msg').length).toBe(80);
+    });
+
+    it('历史弹窗：每行 exit_msg 显示在"信息"列 + tooltip', () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        document.querySelector('[data-act="history"]').click();
+        __test.handleMessage({
+            type: 'automation_history_list', task_id: 't1', total: 1,
+            runs: [{
+                run_id: 'r1', task_id: 't1', status: 'failed',
+                devices: ['S1'], exit_msg: '第一台失败原因',
+            }],
+        });
+        const msgEl = document.querySelector('.automation-hist .automation-hist__list .automation__hist-msg');
+        expect(msgEl).toBeTruthy();
+        expect(msgEl.textContent).toBe('第一台失败原因');
+        expect(msgEl.getAttribute('data-msg')).toBe('第一台失败原因');
+    });
+
+    it('历史弹窗：exit_msg 为空字符串时不报错，显示空', () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        document.querySelector('[data-act="history"]').click();
+        __test.handleMessage({
+            type: 'automation_history_list', task_id: 't1', total: 1,
+            runs: [{ run_id: 'r1', task_id: 't1', status: 'success', devices: ['S1'] }],
+        });
+        const msgEl = document.querySelector('.automation-hist .automation-hist__list .automation__hist-msg');
+        expect(msgEl).toBeTruthy();
+        expect(msgEl.textContent).toBe('');
+    });
+});
+
+describe('M7 exit_msg tooltip 悬浮提示走项目 tooltip 系统', () => {
+    beforeEach(() => {
+        __test.setTestClient(fakeClient());
+    });
+
+    it('卡片 msg 悬浮 → 调项目 tooltip 系统（不用原生 title）', async () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        __test.handleMessage({
+            type: 'automation_history_list',
+            runs: [{
+                run_id: 'r1', task_id: 't1', status: 'failed',
+                exit_msg: '打开 app 失败',
+            }],
+        });
+        const msgEl = document.querySelector('.automation__task-msg');
+        expect(msgEl).toBeTruthy();
+        // 没有原生 title（项目 tooltip 用 data-msg 走 JS 弹气泡）
+        expect(msgEl.hasAttribute('title')).toBe(false);
+        // 悬浮触发项目 tooltip 系统
+        const tooltipMod = await import('../../src/js/tooltip.js');
+        const showSpy = vi.spyOn(tooltipMod, 'showTooltip');
+        const hideSpy = vi.spyOn(tooltipMod, 'hideTooltip');
+        msgEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        msgEl.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+        expect(showSpy).toHaveBeenCalledWith(msgEl, '打开 app 失败');
+        expect(hideSpy).toHaveBeenCalled();
+        showSpy.mockRestore();
+        hideSpy.mockRestore();
+    });
+
+    it('历史弹窗 msg 悬浮 → 同样走项目 tooltip 系统', async () => {
+        __test.handleMessage({ type: 'automation_task_list', tasks: [makeTask()] });
+        document.querySelector('[data-act="history"]').click();
+        __test.handleMessage({
+            type: 'automation_history_list', task_id: 't1', total: 1,
+            runs: [{
+                run_id: 'r1', task_id: 't1', status: 'failed',
+                devices: ['S1'], exit_msg: '历史弹窗悬浮测试',
+            }],
+        });
+        const msgEl = document.querySelector('.automation-hist .automation-hist__list .automation__hist-msg');
+        expect(msgEl.hasAttribute('title')).toBe(false);
+        expect(msgEl.getAttribute('data-msg')).toBe('历史弹窗悬浮测试');
+
+        const tooltipMod = await import('../../src/js/tooltip.js');
+        const showSpy = vi.spyOn(tooltipMod, 'showTooltip');
+        msgEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        expect(showSpy).toHaveBeenCalledWith(msgEl, '历史弹窗悬浮测试');
+        showSpy.mockRestore();
+    });
 });

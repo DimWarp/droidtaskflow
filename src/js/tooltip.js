@@ -30,6 +30,24 @@ function show(target) {
     const key = target.dataset.tooltip;
     if (!key) return;
     el.textContent = t(key);
+    positionTooltip(el, target);
+    el.classList.add('app-tooltip--show');
+}
+
+/**
+ * 直接显示任意字符串在元素 target 上方（与 data-tooltip 共用同一套 .app-tooltip 气泡样式）。
+ * 用于动态内容（如后端返回的 exit_msg）——没法走 i18n key 的场景。
+ * 调用方负责自己挂 mouseenter/mouseleave 触发 show/hideTooltip。
+ */
+export function showTooltip(target, text) {
+    const el = getEl();
+    if (text == null || text === '') return;
+    el.textContent = String(text);
+    positionTooltip(el, target);
+    el.classList.add('app-tooltip--show');
+}
+
+function positionTooltip(el, target) {
     const r = target.getBoundingClientRect();
     el.classList.remove('app-tooltip--show');
     el.style.display = 'block';
@@ -44,7 +62,6 @@ function show(target) {
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     el.style.visibility = '';
-    el.classList.add('app-tooltip--show');
 }
 
 export function initTooltip() {
