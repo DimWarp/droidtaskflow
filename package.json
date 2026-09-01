@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prod": "vite --host 0.0.0.0",
     "check": "node scripts/dev-tools/health-check.mjs",
     "dev:probe": "node scripts/dev-tools/probe.mjs",
     "dev:shot": "node scripts/dev-tools/shot.mjs",

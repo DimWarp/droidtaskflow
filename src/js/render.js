@@ -9,12 +9,26 @@ import { scheduleAutoSave } from './filesystem.js';
 import { refreshCodePreview } from './code-preview.js';
 import { getCurrentFile } from './sidebar.js';
 import { focusedNodeId, focusedCardId, zCounter, _nodeObserver } from './shared.js';
+
+// 节点标题拖拽阈值：pointerdown 后位移超过此像素才视为拖拽（区别于纯点击选中）。
+// 与 global-vars.js / task-palette.js 里的 DRAG_THRESHOLD_PX = 4 保持一致。
+// — 为什么需要：标题是可点击的（点中节点聚焦 / 双击改名），用户拖动 / 选中意图冲突；
+//   旧版 pointerdown 立即 moving=true → 1px 抖动就会位移；新版本阈值内算"纯点击"只选中。
+const DRAG_THRESHOLD_PX = 4;
 import { t as i18n } from './i18n.js';
 import { capture, beginEdit, endEdit } from './history.js';
 
 export function buildTask(t, ctx) {
     const d = DEFS[t.def];
-    if (!d) return E('div', 'task', null, '??');
+    if (!d) {
+        // 卡片未在 DEFS 里（用户用 custom_task.py 定义的、但工作区没打开 / 加载失败），
+        // 旧版显示 "??" 让人困惑。改成明确错误：标 def 名 + 指引去 custom_task.py 加。
+        return E('div', 'task task--undefined', null, [
+            E('div', 'task__undefined-msg', {
+                title: i18n('canvas.cardUndefined', { def: t.def }),
+            }, i18n('canvas.cardUndefined', { def: t.def })),
+        ]);
+    }
 
     let outColors = t._cols;
     if (!outColors || Object.keys(outColors).length !== d.rets.length) {
@@ -60,17 +74,28 @@ export function buildTask(t, ctx) {
         const fs = boxes.map(p => {
             let inp;
             if (p.t === 'code') {
-                const savedH = t.fh && t.fh[p.n];
-                inp = E('textarea', 'field__input', {
+                // 代码输入框：行号列 + 高亮层(pre) + 透明文字 textarea。
+                // 高度由高亮层 pre 内容自动撑起，宽度拖拽改变折行后 pre 自动重排，
+                // 高度/行号由 syncCodeField 同步（见节点缩放 pointermove/up）。
+                const gutter = E('div', 'code-field__gutter', null, [E('div', null, null, '1')]);
+                const hl = E('pre', 'code-field__hl');
+                const ta = E('textarea', 'field__input', {
                     value: t.f[p.n] != null ? t.f[p.n] : '',
-                    oninput: function() { beginEdit(); t.f[p.n] = this.value; state.dirty = true; },
-                    onblur: () => endEdit(),
-                    ...(savedH ? { style: { height: savedH } } : { rows: 3 }),
-                    onmouseup: function() {
-                        if (!t.fh) t.fh = {};
-                        t.fh[p.n] = this.style.height;
+                    'data-autosize': '1',
+                    wrap: 'soft',
+                    rows: 3,
+                    spellcheck: false,
+                    oninput: function() {
+                        beginEdit(); t.f[p.n] = this.value; state.dirty = true;
+                        syncCodeField(this);
                     },
+                    onblur: () => endEdit(),
                 });
+                ta._gutter = gutter;
+                ta._hl = hl;
+                ta.addEventListener('compositionstart', () => ta.classList.add('code-field__composing'));
+                ta.addEventListener('compositionend', () => { ta.classList.remove('code-field__composing'); syncCodeField(ta); });
+                inp = E('div', 'code-field', null, [gutter, E('div', 'code-field__editor', null, [hl, ta])]);
             } else if (p.t === 'list') {
                 inp = E('select', 'field__input', { value: t.f[p.n] != null ? t.f[p.n] : '', onchange: function() { capture(); t.f[p.n] = this.value; state.dirty = true; } },
                     (p.opts || []).map(o => E('option', null, { value: o }, o))
@@ -110,6 +135,78 @@ export function buildTask(t, ctx) {
     const head = E('div', 'task__head', null, title);
     const body = E('div', 'task__body', null, [wires, fields].filter(Boolean));
     return E('article', 'task', { 'data-task-id': t.id }, [head, body]);
+}
+
+/* 代码输入框同步：渲染 Python 高亮（pre）+ 逻辑行号（gutter）。
+   高亮层按"每逻辑行一个 block div"渲染（div 内再包 token span）——textarea 的软换行
+   也是按行独立布局，两者折行点一致（裸文本/连续内联流会与 textarea 折行不同，已实测），
+   故拖动节点宽度改变折行后重渲染即自动收缩/撑高（高度由 pre 内容撑起，textarea 绝对
+   定位铺满容器，无需 JS 管高度）。
+   行号按逻辑行（\n 分隔）编号：行号 div 高度 = 对应逻辑行实际显示高度，软换行折出的
+   行在 gutter 留空。offsetWidth 为 0 说明未挂载/无布局（jsdom），跳过。 */
+function syncCodeField(ta) {
+    if (!ta.offsetWidth) return;
+    const hl = ta._hl;
+    const g = ta._gutter;
+    if (hl) {
+        const lines = ta.value.split('\n');
+        let html = '';
+        for (const ln of lines) {
+            // 空行用 nbsp 占位保证 block div 有行高；高亮按行执行
+            html += '<div>' + highlightPython(ln.length ? ln : '\u00a0') + '</div>';
+        }
+        hl.innerHTML = html;
+    }
+    if (g && hl) {
+        let gh = '';
+        const kids = hl.children;
+        for (let i = 0; i < kids.length; i++) {
+            // 行高取浮点（getBoundingClientRect）避免 offsetHeight 取整累加误差；
+            // 画布有 transform: scale(state.zoom)，rect 返回的是缩放后的屏幕高度，
+            // 必须除以 zoom 还原为布局像素，否则行号 div 高度被二次缩放——
+            // zoom<1 行号挤在一起、zoom>1 行号间距偏大（与 alignExitPorts 同一处理模式）。
+            const h = kids[i].getBoundingClientRect().height / state.zoom;
+            gh += '<div style="height:' + h + 'px">' + (i + 1) + '</div>';
+        }
+        g.innerHTML = gh;
+    }
+}
+function syncAllCodeFields() {
+    document.querySelectorAll('textarea.field__input[data-autosize]').forEach(syncCodeField);
+}
+function syncNodeCodeFields(root) {
+    root.querySelectorAll('textarea.field__input[data-autosize]').forEach(syncCodeField);
+}
+// 自托管字体 font-display: swap：字体加载完成后字符宽度变化 → 折行变化，
+// 重测一次全部代码框（首次 render 若在字体就绪前，折行/行号按 fallback 字体算会偏）。
+if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => syncAllCodeFields());
+}
+
+/* 极简 Python 语法高亮：注释 / 字符串（含三引号与前缀）/ 数字 / 装饰器 / 关键字 / 内置函数。
+   按"单行"调用（每逻辑行独立高亮，行容器保证与 textarea 折行一致）。
+   单次正则交替匹配——字符串、注释整段吞掉，其内部不再二次匹配；输出已转义 HTML。
+   仅做"够用"级别的显示高亮，不追求完整词法。 */
+const _PY_RE = /(#[^\n]*)|("""[\s\S]*?"""|'''[\s\S]*?'''|(?:[rRbBuUfF]{0,2})"(?:[^"\\\n]|\\.)*"|(?:[rRbBuUfF]{0,2})'(?:[^'\\\n]|\\.)*')|(\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|(@[\w.]+)|(\b(?:False|None|True|and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield)\b)|(\b(?:abs|all|any|bin|bool|bytearray|bytes|callable|chr|classmethod|compile|complex|delattr|dict|dir|divmod|enumerate|eval|exec|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|isinstance|issubclass|iter|len|list|locals|map|max|memoryview|min|next|object|oct|open|ord|pow|print|property|range|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|vars|zip|__import__)\b)/g;
+function _escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function highlightPython(code) {
+    let out = '', last = 0, m;
+    while ((m = _PY_RE.exec(code))) {
+        out += _escHtml(code.slice(last, m.index));
+        let cls;
+        if (m[1] !== undefined) cls = 'tk-comment';
+        else if (m[2] !== undefined) cls = 'tk-string';
+        else if (m[3] !== undefined) cls = 'tk-number';
+        else if (m[4] !== undefined) cls = 'tk-decorator';
+        else if (m[5] !== undefined) cls = 'tk-keyword';
+        else cls = 'tk-builtin';
+        out += '<span class="' + cls + '">' + _escHtml(m[0]) + '</span>';
+        last = m.index + m[0].length;
+    }
+    out += _escHtml(code.slice(last));
+    return out;
 }
 
 function _showImagePopup(task, paramName) {
@@ -403,15 +500,24 @@ function buildGotoNode(n, world) {
 
     const h = editable(n.name, v => { capture(); n.name = v; render(); }, 'node__title');
     const hdr = E('header', 'node__header', null, h);
-    let mx, my, ox, oy, moving = false, _moveRAF = null;
+    // moving: 真在拖动（位移过阈值）。pending: pointerdown 已按但未超阈值（候选拖动）。
+    // 区分二者：超阈值前算"纯点击"——只选中节点不进入拖动；超阈值才 capture 撤销并 moving。
+    let mx, my, ox, oy, moving = false, pending = false, _moveRAF = null;
     hdr.addEventListener('pointerdown', e => {
         if (e.button !== 0) return;
         if (e.target.contentEditable === 'true') return;
-        capture();   // 拖动手势起点：整段拖动一步撤销
-        moving = true; mx = e.clientX; my = e.clientY; ox = n.x; oy = n.y;
+        // 记起点但不调 capture —— 阈值内松手 = 纯点击（只选中节点，不进撤销栈）。
+        // 真进入拖动时再 capture 一次（只占"拖动前"那一帧，不浪费"纯点击"的撤销位）。
+        pending = true; mx = e.clientX; my = e.clientY; ox = n.x; oy = n.y;
         n.el.style.willChange = 'transform';
     });
     document.addEventListener('pointermove', e => {
+        if (pending && !moving) {
+            if (Math.hypot(e.clientX - mx, e.clientY - my) < DRAG_THRESHOLD_PX) return;
+            // 越过阈值 → 真进入拖动（捕获撤销 + 提升合成层）
+            moving = true;
+            capture();
+        }
         if (!moving) return;
         n.x = ox + (e.clientX - mx) / state.zoom;
         n.y = oy + (e.clientY - my) / state.zoom;
@@ -419,6 +525,11 @@ function buildGotoNode(n, world) {
         if (!_moveRAF) _moveRAF = requestAnimationFrame(() => { _moveRAF = null; drawWires(true); });
     });
     document.addEventListener('pointerup', () => {
+        if (pending) {
+            pending = false;
+            // 纯点击：清除 willChange 提升，不改 state.dirty（已确认阈值内未位移）
+            n.el.style.willChange = '';
+        }
         if (!moving) return;
         moving = false;
         if (_moveRAF) { cancelAnimationFrame(_moveRAF); _moveRAF = null; }
@@ -555,15 +666,20 @@ export function render(skipDirty) {
         const h = editable(n.name, v => { capture(); n.name = v; render(); }, 'node__title');
         const hdr = E('header', 'node__header', null, h);
 
-        let mx, my, ox, oy, moving = false, _moveRAF = null;
+        let mx, my, ox, oy, moving = false, pending = false, _moveRAF = null;
         hdr.addEventListener('pointerdown', e => {
             if (e.button !== 0) return;
             if (e.target.contentEditable === 'true') return;
-            capture();   // 拖动手势起点：整段拖动一步撤销
-            moving = true; mx = e.clientX; my = e.clientY; ox = n.x; oy = n.y;
-            n.el.style.willChange = 'transform';   // 拖动期提升为独立合成层，合成器直接搬
+            // 阈值模式：阈值内算"纯点击"（只选中），超阈值才 capture + moving
+            pending = true; mx = e.clientX; my = e.clientY; ox = n.x; oy = n.y;
+            n.el.style.willChange = 'transform';
         });
         document.addEventListener('pointermove', e => {
+            if (pending && !moving) {
+                if (Math.hypot(e.clientX - mx, e.clientY - my) < DRAG_THRESHOLD_PX) return;
+                moving = true;
+                capture();
+            }
             if (!moving) return;
             n.x = ox + (e.clientX - mx) / state.zoom;
             n.y = oy + (e.clientY - my) / state.zoom;
@@ -574,6 +690,7 @@ export function render(skipDirty) {
             if (!_moveRAF) _moveRAF = requestAnimationFrame(() => { _moveRAF = null; drawWires(true); });
         });
         document.addEventListener('pointerup', () => {
+            if (pending) { pending = false; n.el.style.willChange = ''; }
             if (!moving) return;
             moving = false;
             if (_moveRAF) { cancelAnimationFrame(_moveRAF); _moveRAF = null; }
@@ -607,8 +724,13 @@ export function render(skipDirty) {
             if (side === 'L') { n.x = ox2 - (n.w - ow); n.el.style.left = n.x + 'px'; }
             n.el.style.width = n.w + 'px';
             drawWires();
+            // 宽度变化 → 软换行折行数变化 → 代码框高度/行号需跟随（拖拽中实时更新）
+            syncNodeCodeFields(n.el);
         });
-        document.addEventListener('pointerup', () => { if (side) state.dirty = true; side = null; });
+        document.addEventListener('pointerup', () => {
+            if (side) { state.dirty = true; syncNodeCodeFields(n.el); }   // 落定后再同步一次
+            side = null;
+        });
 
         // LOGIC 多列结构规范化（扁平旧数据 → 单列；清理空白列）
         normalizeLogic(n);
@@ -828,6 +950,7 @@ export function render(skipDirty) {
     });
     bindWireDrag();
     drawWires();
+    syncAllCodeFields();   // 代码输入框按内容撑高 + 行号（需在 DOM 挂载后取 scrollHeight）
     scheduleAutoSave(state, getCurrentFile());
     refreshCodePreview();
 }

@@ -126,6 +126,9 @@ export function confirmSaveBeforeClose() {
             }
 
             cleanup();
+            // 保存工程后刷新工程清单：保险起见，外部可能并发改了文件（Pyodide 后台、
+            // 用户在 VSCode 改了对应文件等）。保存本身不改动文件名，但刷新一次让 UI 同步。
+            await refreshProjectList();
             resolve(true);
         }
 

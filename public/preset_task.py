@@ -396,7 +396,7 @@ def adb_press_key(key):
     params={
         "status": {"type": "list", "ui_width": 0.4, "init_value": "success",
                    "opts": ["success", "failed"]},
-        "msg": {"type": "box", "ui_width": 0.6, "init_value": ""},
+        "msg": {"type": "both", "ui_width": 0.6, "init_value": "exit msg not set"},
     })
 def exit_with_status(status="success", msg=""):
     """脚本按 status + msg 退出。后端从 stdout 抓取并写入 history.exit_msg。

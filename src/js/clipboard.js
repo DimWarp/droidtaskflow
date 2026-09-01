@@ -7,7 +7,9 @@ import { focusedNodeId, focusedCardId, zCounter, setFocusedNodeId, setFocusedCar
 import { capture } from './history.js';
 import { t } from './i18n.js';
 
-export let clipboard = null;
+// 用对象引用而非 let 绑定：外部（测试、其他模块）可以读写 .item / .type，
+// 模块内也可以整体替换（clipboard.item = {...}）。let 绑定从外部不可赋值。
+export const clipboard = { item: null, type: null };
 
 export function initClipboard() {
     // Node/card focus: two-level focus system
@@ -68,7 +70,8 @@ export function initClipboard() {
             const sel = window.getSelection();
             if (sel && sel.toString().length > 0) return;
             e.preventDefault();
-            clipboard = null;
+            clipboard.item = null;
+            clipboard.type = null;
             if (focusedCardId && focusedNodeId) {
                 const n = state.nodes.find(n => n.id === focusedNodeId);
                 if (n) {
@@ -79,17 +82,17 @@ export function initClipboard() {
                             if (found) break;
                         }
                     }
-                    if (found) { clipboard = { item: JSON.parse(JSON.stringify(found)), type: 'task' }; }
+                    if (found) { clipboard.item = JSON.parse(JSON.stringify(found)); clipboard.type = 'task'; }
                     for (const g of (n.groups || [])) {
                         const o = g.ops.find(o => o.id === focusedCardId);
-                        if (o) { clipboard = { item: JSON.parse(JSON.stringify(o)), type: 'task' }; break; }
-                        if (g.id === focusedCardId) { clipboard = { item: JSON.parse(JSON.stringify(g)), type: 'group' }; break; }
+                        if (o) { clipboard.item = JSON.parse(JSON.stringify(o)); clipboard.type = 'task'; break; }
+                        if (g.id === focusedCardId) { clipboard.item = JSON.parse(JSON.stringify(g)); clipboard.type = 'group'; break; }
                     }
                 }
                 if (clipboard) toast(t('toast.copiedTask'));
             } else if (focusedNodeId) {
                 const n = state.nodes.find(n => n.id === focusedNodeId);
-                if (n) { clipboard = { item: JSON.parse(JSON.stringify(n)), type: 'node' }; toast(t('toast.copiedNode')); }
+                if (n) { clipboard.item = JSON.parse(JSON.stringify(n)); clipboard.type = 'node'; toast(t('toast.copiedNode')); }
             }
         }
         if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
@@ -101,7 +104,18 @@ export function initClipboard() {
             if (clipboard.type === 'node') {
                 const clone = JSON.parse(JSON.stringify(clipboard.item));
                 clone.id = 'n' + Date.now();
-                clone.x += 40; clone.y += 40;
+                // 粘贴到画布相机中心（viewport center in canvas coordinates）。
+                // 跟"添加节点"按钮位置一致：用户当前可见区域正中间，方便立刻操作。
+                // 公式：world = screen_offset / zoom - pan（pan 是 zoom 之前的世界偏移）。
+                // .canvas 缺失时 fallback 到原位置偏移（jsdom 测试 / 极简 fixture）。
+                const canvasEl = document.querySelector('.canvas');
+                if (canvasEl) {
+                    const cr = canvasEl.getBoundingClientRect();
+                    clone.x = Math.round((cr.width / 2) / state.zoom - state.panX);
+                    clone.y = Math.round((cr.height / 2) / state.zoom - state.panY);
+                } else {
+                    clone.x += 40; clone.y += 40;
+                }
                 if (clone.groups) clone.groups.forEach(g => { g.id = 'g' + Date.now(); if (g.ops) g.ops.forEach((o, i) => { o.id = 'o' + Date.now() + '_' + i; o.in = {}; }); });
                 clone.info.forEach((t, i) => { t.id = 't' + Date.now() + '_' + i; t.in = {}; });
                 // LOGIC 多列：逐列重映射 ID（兼容旧扁平结构 → 单列）

@@ -102,13 +102,21 @@ export async function copyProject(dirHandle, filename) {
     return newFilename;
 }
 
-/** Create a new project file with a UUID name. Returns the filename. */
-export async function createNewProject(dirHandle) {
+/** Create a new project file with a UUID name. Returns the filename.
+ * 
+ * 不传 code：生成 NewProject 默认模板（仅含一个 start node + device_id 全局变量）。
+ * 传 code：用 code 写文件，文件名前缀仍是 uuid（避免和现有工程冲突）。
+ *   用例：自动化任务"提取脚本到工程"——后端从 bundle 读 main.py 内容，前端
+ *   传 code 用真实工程内容（不是模板）。
+ */
+export async function createNewProject(dirHandle, code = null) {
     const pd = await getProjectDir(dirHandle);
     const uuid = crypto.randomUUID();
     const filename = uuid + '.py';
-    const startNodeId = 'n' + Date.now();
-    const code = `"""
+    if (!code) {
+        // 默认 NewProject 模板（仅占位 start node，给用户一个起点）
+        const startNodeId = 'n' + Date.now();
+        code = `"""
 @droidtaskflow:project
 @droidtaskflow:version 1.0
 """
@@ -148,6 +156,7 @@ if __name__ == '__main__':
     except NameError:
         pass  # Pyodide / embedded — no __file__, parse-only mode
 `;
+    }
     const fh = await pd.getFileHandle(filename, { create: true });
     const writable = await fh.createWritable();
     await writable.write(code);

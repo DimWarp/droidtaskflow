@@ -1,6 +1,7 @@
 /**
  * 判定一次 pointerdown 是否应启动画布平移。
- * 中键（1）恒可平移；右键（2）在拖线中恒可平移（含节点上）、非拖线仅限空白；
+ * 中键（1）恒可平移；右键（2）跟中键一样穿透任何元素平移（让"按住右键拖画布"在节点/工具栏上都生效），
+ * 浏览器原生 contextmenu 已被 interactions.js 全局 preventDefault，不会弹系统菜单。
  * 左键（0）仅限空白且未拖线（拖线中左键已归拖线用）。
  * @param {number}  button             PointerEvent.button（0 左 / 1 中 / 2 右）
  * @param {boolean} overNode           光标是否命中 .node
@@ -11,7 +12,9 @@
  */
 export function shouldStartPan(button, overNode, overZoomBar, overToolbar, wireDragActive, overWireDelete) {
     if (button === 1) return true;
-    if (button === 2) return wireDragActive || (!overNode && !overZoomBar && !overToolbar && !overWireDelete);
+    // 右键（2）跟中键一样：穿透任何元素平移。之前的"只在拖线 / 空白才平移"太严，
+    // 用户在节点标题上想拖画布时只移动了节点，文档设备预览 / zoomBar / 工具栏区域更点不到。
+    if (button === 2) return true;
     if (button === 0) return !wireDragActive && !overNode && !overZoomBar && !overToolbar && !overWireDelete;
     return false;
 }

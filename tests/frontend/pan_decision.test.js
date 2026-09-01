@@ -13,12 +13,12 @@ describe('shouldStartPan', () => {
         expect(shouldStartPan(2, true,  true,  true,  true)).toBe(true);  // 任意目标
         expect(shouldStartPan(2, false, false, false, true)).toBe(true);  // 空白
     });
-    it('非拖线时右键只允许在空白区域平移', () => {
+    it('右键 (2) 跟中键一样穿透任何元素平移（contextmenu 已被全局 preventDefault）', () => {
         expect(shouldStartPan(2, false, false, false, false)).toBe(true);
-        expect(shouldStartPan(2, true,  false, false, false)).toBe(false); // 节点上
-        expect(shouldStartPan(2, false, true,  false, false)).toBe(false); // zoomBar
-        expect(shouldStartPan(2, false, false, true,  false)).toBe(false); // toolbar
-        expect(shouldStartPan(2, false, false, false, false, true)).toBe(false); // 删除钮
+        expect(shouldStartPan(2, true,  false, false, false)).toBe(true); // 节点上
+        expect(shouldStartPan(2, false, true,  false, false)).toBe(true); // zoomBar
+        expect(shouldStartPan(2, false, false, true,  false)).toBe(true); // toolbar
+        expect(shouldStartPan(2, false, false, false, false, true)).toBe(true); // 删除钮
     });
     it('左键 (0) 只在空白且未拖线时平移', () => {
         expect(shouldStartPan(0, false, false, false, false)).toBe(true);
@@ -91,18 +91,18 @@ describe('panButtonEdge — 按钮位掩码上升/下降沿', () => {
         const r = panButtonEdge(0, 2, EMPTY, null);
         expect(r).toEqual({ start: true, button: 2 });
     });
-    it('非拖线右键在节点上按下：不启动', () => {
+    it('非拖线右键在节点上按下：启动（跟中键一样穿透）', () => {
         const r = panButtonEdge(0, 2, { ...EMPTY, overNode: true }, null);
-        expect(r).toBeNull();
+        expect(r).toEqual({ start: true, button: 2 });
     });
     // ---- overWireDelete 贯通（真实路径：捕获相位 pointerdown 会走到 panButtonEdge）----
     it('左键按下删除钮：不启动平移（overWireDelete 排除贯通到真实路径）', () => {
         const r = panButtonEdge(0, 1, { ...EMPTY, overWireDelete: true }, null);
         expect(r).toBeNull();
     });
-    it('非拖线右键按下删除钮：不启动平移', () => {
+    it('非拖线右键按下删除钮：启动平移（穿透任何元素）', () => {
         const r = panButtonEdge(0, 2, { ...EMPTY, overWireDelete: true }, null);
-        expect(r).toBeNull();
+        expect(r).toEqual({ start: true, button: 2 });
     });
     it('拖线中右键按下删除钮：仍启动平移（拖线恒可平移，不被排除覆盖）', () => {
         const r = panButtonEdge(0, 3, { ...EMPTY, wireDragActive: true, overWireDelete: true }, null);

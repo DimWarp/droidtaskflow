@@ -10,8 +10,9 @@ import { state, toast } from './state.js';
 import { getSelectedBackendId, buildProjectBundle, bytesToBase64 } from './backend-client.js';
 import { getClientById } from './backend-panel.js';
 import { generateDroidtaskflowPy } from './datamapper.js';
+import { refreshProjectList } from './sidebar.js';
 import { t, onLanguageChange } from './i18n.js';
-import { getDirHandle, listProjectFiles, getProjectName, readProjectSource } from './filesystem.js';
+import { getDirHandle, listProjectFiles, getProjectName, readProjectSource, createNewProject } from './filesystem.js';
 import { parseAnsi } from './console-panel.js';
 import { createCopyMenu } from './copy-menu.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
@@ -718,6 +719,44 @@ function _closeEditor() {
   if (_editorRoot) { _editorRoot.remove(); _editorRoot = null; }
 }
 
+// 把自动化任务的脚本（task bundle 里的 main.py）写到当前工作区，作为新工程。
+// 文件名走 createNewProject 自动生成 uuid，不与现有工程冲突。
+async function extractScriptToProject(task) {
+    const cli = _getClient();
+    if (!cli || cli.state !== 'connected') { toast(t('automation.needBackend')); return; }
+    const dh = getDirHandle();
+    if (!dh) { toast(t('toast.openDirFirst')); return; }
+
+    // 临时注册一次 automation reply 处理器，取一次 reply 立即移除（避免污染全局 _onAutomation）
+    const onAutomation = (msg) => {
+        if (msg.type !== 'automation_extract_script_reply' || msg.task_id !== task.id) return;
+        cli.off?.('automation', onAutomation);   // _emit 仍会调所有 listener，但已删除
+        clearTimeout(timer);
+        (async () => {
+            if (!msg.ok) {
+                toast(t('automation.extractScriptFail', { msg: msg.error || '' }));
+                return;
+            }
+            try {
+                const filename = await createNewProject(dh, msg.main_py);
+                toast(t('automation.extractScriptOk', { filename }));
+                // 刷新工程侧栏让新文件可见（直接 import 调，sidebar.js 暴露了 refreshProjectList）
+                await refreshProjectList();
+            } catch (e) {
+                toast(t('automation.extractScriptFail', { msg: e.message || String(e) }));
+            }
+        })();
+    };
+    cli.on('automation', onAutomation);
+    // 30s 超时兜底：reply 不到就移除 listener
+    const timer = setTimeout(() => {
+        cli.off?.('automation', onAutomation);
+        toast(t('automation.extractScriptFail', { msg: 'timeout' }));
+    }, 30000);
+
+    cli.sendRaw({ type: 'automation_extract_script_req', task_id: task.id });
+}
+
 async function openEditor(task) {
   _closeEditor();   // 清理上一次未关的弹窗（防止残留 ESC 监听）
   _editorIsEdit = Boolean(task);
@@ -766,6 +805,7 @@ async function openEditor(task) {
           </div>
         </div>
         <div id="ae-script-box" class="automation-editor__script"></div>
+        ${task ? `<button type="button" id="ae-extract-script" class="automation__btn automation__btn--lg">${t('automation.extractScript')}</button>` : ''}
         <div class="automation-editor__devices">
           <div class="automation-editor__devices-title">${t('automation.device')}
             <button type="button" id="ae-add-device" class="automation__btn">+</button>
@@ -959,6 +999,10 @@ async function openEditor(task) {
   }
   extra.forEach(([k, v]) => addVarRow(k, v));
   document.getElementById('ae-add-var').addEventListener('click', () => addVarRow());
+
+  // 提取脚本到工程（仅编辑已有任务时按钮才渲染 → 一定有 task）
+  const extractBtn = document.getElementById('ae-extract-script');
+  if (extractBtn) extractBtn.addEventListener('click', () => extractScriptToProject(task));
 
   // 计划参数表单
   const typeSel = document.getElementById('ae-type');
