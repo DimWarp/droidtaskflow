@@ -103,7 +103,10 @@ export function initClipboard() {
             const toNode = state.nodes.find(n => n.id === focusedNodeId);
             if (clipboard.type === 'node') {
                 const clone = JSON.parse(JSON.stringify(clipboard.item));
-                clone.id = 'n' + Date.now();
+                // id 前缀必须匹配节点类型：goto 节点用 'g'（与 btnAddGoto 按钮保持一致），
+                // 普通节点用 'n'。原代码无脑写 'n' 导致 goto 粘贴后 id 是 'nxxx'，
+                // 后续序列化 / 反序列化 / 引用查找都会跟新加的 'gxxx' 不一致。
+                clone.id = (clone.type === 'goto' ? 'g' : 'n') + Date.now();
                 // 粘贴到画布相机中心（viewport center in canvas coordinates）。
                 // 跟"添加节点"按钮位置一致：用户当前可见区域正中间，方便立刻操作。
                 // 公式：world = screen_offset / zoom - pan（pan 是 zoom 之前的世界偏移）。

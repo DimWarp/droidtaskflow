@@ -1867,3 +1867,725 @@ describe('M7 操作下拉：电源开/关（幂等）', () => {
         }
     });
 });
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// M8: 操作下拉新增点击/滑动/返回；除清空外都需要后端+设备有效
+// ───────────────────────────────────────────────────────────────────────────────
+
+describe('M8 操作：点击/滑动/返回 + M8b：主页/菜单/输入/电源', () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="devicePreview" class="device-preview device-preview--collapsed">
+                <div id="devicePreviewHeader"></div>
+                <div id="devicePreviewBody">
+                    <button id="btnDeviceScreenshot" disabled></button>
+                    <button id="btnDeviceOpenImage">上传</button>
+                    <div class="device-preview__actions">
+                        <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                        <div id="deviceActionsMenu" class="device-tools-menu" hidden>
+                            <button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear" disabled>清空</button>
+                            <button class="device-tools-menu__item" data-action="power-on" disabled>电源开</button>
+                            <button class="device-tools-menu__item" data-action="power-off" disabled>电源关</button>
+                            <button class="device-tools-menu__item" data-action="home" disabled>主页</button>
+                            <button class="device-tools-menu__item" data-action="back" disabled>返回</button>
+                            <button class="device-tools-menu__item" data-action="menu" disabled>菜单</button>
+                            <button class="device-tools-menu__item" data-action="tap" disabled>点击</button>
+                            <button class="device-tools-menu__item" data-action="swipe" disabled>滑动</button>
+                            <button class="device-tools-menu__item" data-action="input" disabled>输入</button>
+                        </div>
+                    </div>
+                    <div class="device-preview__tools">…</div>
+                    <div id="devicePreviewStage" class="device-preview__stage--empty">
+                        <canvas></canvas>
+                        <div id="devicePreviewSpinner" class="device-preview__spinner--hidden"></div>
+                    </div>
+                    <div id="devicePreviewInfobar">
+                        <div id="devicePreviewInfobarPick"><span></span></div>
+                        <div id="devicePreviewInfobarHover"><span></span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    function getAction(action) {
+        return document.querySelector(`#deviceActionsMenu [data-action="${action}"]`);
+    }
+
+    it('后端未连 + 无设备：所有操作项 disabled，清空也 disabled', async () => {
+        state.devicePreview.serial = null;
+        state.devicePreview.source = null;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'disconnected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        expect(getAction('clear').disabled).toBe(true);
+        expect(getAction('power-on').disabled).toBe(true);
+        expect(getAction('power-off').disabled).toBe(true);
+        expect(getAction('home').disabled).toBe(true);
+        expect(getAction('back').disabled).toBe(true);
+        expect(getAction('menu').disabled).toBe(true);
+        expect(getAction('tap').disabled).toBe(true);
+        expect(getAction('swipe').disabled).toBe(true);
+        expect(getAction('input').disabled).toBe(true);
+    });
+
+    it('后端已连 + 有设备 + 有图：所有操作项 enabled', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.source = 'backend';
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        expect(getAction('clear').disabled).toBe(false);
+        expect(getAction('power-on').disabled).toBe(false);
+        expect(getAction('power-off').disabled).toBe(false);
+        expect(getAction('home').disabled).toBe(false);
+        expect(getAction('back').disabled).toBe(false);
+        expect(getAction('menu').disabled).toBe(false);
+        expect(getAction('tap').disabled).toBe(false);
+        expect(getAction('swipe').disabled).toBe(false);
+        expect(getAction('input').disabled).toBe(false);
+    });
+
+    it('后端断了 / 设备掉线：所有非清空项 disabled（清空仍按 hasImage 判断）', async () => {
+        // 模拟：之前连上+有图，按钮 enabled；设备掉线 → syncActionsMenu 重新跑 → 操作项 disabled
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.source = 'backend';
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+        expect(getAction('tap').disabled).toBe(false);
+
+        // 设备掉线（后端还在）
+        state.devicePreview.serial = null;
+        dp.initDevicePreview();
+        expect(getAction('clear').disabled).toBe(false);
+        expect(getAction('power-on').disabled).toBe(true);
+        expect(getAction('power-off').disabled).toBe(true);
+        expect(getAction('home').disabled).toBe(true);
+        expect(getAction('back').disabled).toBe(true);
+        expect(getAction('menu').disabled).toBe(true);
+        expect(getAction('tap').disabled).toBe(true);
+        expect(getAction('swipe').disabled).toBe(true);
+        expect(getAction('input').disabled).toBe(true);
+    });
+});
+
+describe('M8b 操作：菜单顺序', () => {
+    it('操作下拉菜单项按指定顺序排列：清空→电源开→电源关→主页→返回→菜单→点击→滑动→输入', async () => {
+        document.body.innerHTML = `
+            <div id="devicePreview" class="device-preview">
+                <div id="devicePreviewHeader"></div>
+                <div id="devicePreviewBody">
+                    <button id="btnDeviceScreenshot"></button>
+                    <button id="btnDeviceOpenImage"></button>
+                    <div class="device-preview__actions">
+                        <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                        <div id="deviceActionsMenu" class="device-tools-menu" hidden>
+                            <button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear" disabled>清空</button>
+                            <button class="device-tools-menu__item" data-action="power-on" disabled>电源开</button>
+                            <button class="device-tools-menu__item" data-action="power-off" disabled>电源关</button>
+                            <button class="device-tools-menu__item" data-action="home" disabled>主页</button>
+                            <button class="device-tools-menu__item" data-action="back" disabled>返回</button>
+                            <button class="device-tools-menu__item" data-action="menu" disabled>菜单</button>
+                            <button class="device-tools-menu__item" data-action="tap" disabled>点击</button>
+                            <button class="device-tools-menu__item" data-action="swipe" disabled>滑动</button>
+                            <button class="device-tools-menu__item" data-action="input" disabled>输入</button>
+                        </div>
+                    </div>
+                    <div class="device-preview__tools">…</div>
+                    <div id="devicePreviewStage"><canvas></canvas></div>
+                </div>
+            </div>
+        `;
+        const items = document.querySelectorAll('#deviceActionsMenu [data-action]');
+        const order = Array.from(items).map(el => el.dataset.action);
+        expect(order).toEqual([
+            'clear', 'power-on', 'power-off', 'home', 'back', 'menu',
+            'tap', 'swipe', 'input',
+        ]);
+    });
+});
+
+describe('M8b 操作：home/menu 走 keyevent', () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="devicePreview" class="device-preview">
+                <div id="devicePreviewHeader"></div>
+                <div id="devicePreviewBody">
+                    <button id="btnDeviceScreenshot"></button>
+                    <button id="btnDeviceOpenImage"></button>
+                    <div class="device-preview__actions">
+                        <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                        <div id="deviceActionsMenu" class="device-tools-menu">
+                            <button class="device-tools-menu__item" data-action="home">主页</button>
+                            <button class="device-tools-menu__item" data-action="back">返回</button>
+                            <button class="device-tools-menu__item" data-action="menu">菜单</button>
+                        </div>
+                    </div>
+                    <div class="device-preview__tools">…</div>
+                    <div id="devicePreviewStage"><canvas></canvas></div>
+                    <div id="devicePreviewInfobar">
+                        <div id="devicePreviewInfobarPick"><span></span></div>
+                        <div id="devicePreviewInfobarHover"><span></span></div>
+                        <div id="devicePreviewInfobarApp"><span></span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    it('点"主页"调 requestDeviceKeyevent(serial, 3)', async () => {
+        state.devicePreview.serial = 'S49';
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        // 直接 mock client._ws.send（绕过握手）
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="home"]').click();
+        const last = JSON.parse(sent[sent.length - 1]);
+        expect(last).toEqual({ type: 'device_keyevent_req', serial: 'S49', keycode: 3 });
+    });
+
+    it('点"菜单"调 requestDeviceKeyevent(serial, 82)', async () => {
+        state.devicePreview.serial = 'S49';
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="menu"]').click();
+        const last = JSON.parse(sent[sent.length - 1]);
+        expect(last).toEqual({ type: 'device_keyevent_req', serial: 'S49', keycode: 82 });
+    });
+
+    it('点"返回"调 requestDeviceKeyevent(serial, 4)', async () => {
+        state.devicePreview.serial = 'S49';
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="back"]').click();
+        const last = JSON.parse(sent[sent.length - 1]);
+        expect(last).toEqual({ type: 'device_keyevent_req', serial: 'S49', keycode: 4 });
+    });
+});
+
+describe('M8b 操作：输入 打开面板 + 发送调 input_text', () => {
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="devicePreview" class="device-preview">
+                <div id="devicePreviewHeader"></div>
+                <div id="devicePreviewBody">
+                    <button id="btnDeviceScreenshot"></button>
+                    <button id="btnDeviceOpenImage"></button>
+                    <div class="device-preview__actions">
+                        <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                        <div id="deviceActionsMenu" class="device-tools-menu">
+                            <button class="device-tools-menu__item" data-action="input">输入</button>
+                        </div>
+                    </div>
+                    <div class="device-preview__tools">…</div>
+                    <div id="devicePreviewStage">
+                        <canvas></canvas>
+                        <div id="devicePreviewSpinner" class="device-preview__spinner--hidden"></div>
+                    </div>
+                    <div id="devicePreviewInfobar">
+                        <div id="devicePreviewInfobarPick"><span></span></div>
+                        <div id="devicePreviewInfobarHover"><span></span></div>
+                        <div id="devicePreviewInfobarApp"><span></span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    it('点"输入"调出输入面板（蒙版 + textarea + 发送按钮）', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="input"]').click();
+        const mask = document.querySelector('.device-record-mask');
+        const panel = document.querySelector('.device-input-panel');
+        const ta = panel && panel.querySelector('textarea');
+        const send = panel && panel.querySelector('.device-input-panel__send');
+        expect(mask).toBeTruthy();
+        expect(panel).toBeTruthy();
+        expect(ta).toBeTruthy();
+        expect(send).toBeTruthy();
+    });
+
+    it('输入文字 + 点发送 → requestDeviceInputText(serial, text) + 关闭面板', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="input"]').click();
+        const ta = document.querySelector('.device-input-panel__textarea');
+        const send = document.querySelector('.device-input-panel__send');
+        ta.value = 'hello 你好';
+        send.click();
+
+        // 面板已清掉
+        expect(document.querySelector('.device-input-panel')).toBeNull();
+        // ws 发了 input_text_req
+        const inputMsg = sent.map(JSON.parse).find(m => m.type === 'device_input_text_req');
+        expect(inputMsg).toEqual({
+            type: 'device_input_text_req', serial: 'S49', text: 'hello 你好',
+        });
+    });
+
+    it('空文本点发送：不发请求 + 面板仍在 + toast 提示', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="input"]').click();
+        const send = document.querySelector('.device-input-panel__send');
+        send.click();
+        // 没发任何 input_text_req
+        const inputMsg = sent.map(JSON.parse).find(m => m.type === 'device_input_text_req');
+        expect(inputMsg).toBeUndefined();
+        // 面板还在（点空白才能关）
+        expect(document.querySelector('.device-input-panel')).toBeTruthy();
+    });
+
+    it('输入文字 + 点"发送并Enter" → 先发文本再发 keyevent(66=ENTER)', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="input"]').click();
+        const ta = document.querySelector('.device-input-panel__textarea');
+        const sendEnter = document.querySelector('.device-input-panel__send-enter');
+        expect(sendEnter).toBeTruthy();   // 按钮存在
+        ta.value = '搜索内容';
+        sendEnter.click();
+
+        // 面板已清
+        expect(document.querySelector('.device-input-panel')).toBeNull();
+        // 发送顺序：先 input_text_req，再 keyevent(66=ENTER)
+        const types = sent.map(s => JSON.parse(s).type);
+        const inputIdx = types.indexOf('device_input_text_req');
+        const enterIdx = types.indexOf('device_keyevent_req');
+        expect(inputIdx).toBeGreaterThanOrEqual(0);
+        expect(enterIdx).toBeGreaterThan(inputIdx);   // 顺序：先 text 再 Enter
+        const allMsgs = sent.map(JSON.parse);
+        expect(allMsgs[inputIdx]).toEqual({
+            type: 'device_input_text_req', serial: 'S49', text: '搜索内容',
+        });
+        expect(allMsgs[enterIdx]).toEqual({
+            type: 'device_keyevent_req', serial: 'S49', keycode: 66,
+        });
+    });
+
+    it('textarea 按 Enter（不按 Shift）= 等同于"发送并Enter"', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        const sent = [];
+        client._ws = { readyState: 1, send: (s) => sent.push(s) };
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        document.querySelector('[data-action="input"]').click();
+        const ta = document.querySelector('.device-input-panel__textarea');
+        ta.value = 'abc';
+        // 模拟 Enter 键（非 Shift 模式）
+        ta.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', bubbles: true, cancelable: true,
+        }));
+        // 应该按"发送并Enter"路径：发文本 + Enter keyevent
+        const types = sent.map(s => JSON.parse(s).type);
+        expect(types).toContain('device_input_text_req');
+        expect(types).toContain('device_keyevent_req');
+        const enterMsg = sent.map(JSON.parse).find(m => m.type === 'device_keyevent_req');
+        expect(enterMsg.keycode).toBe(66);
+    });
+});
+
+describe('M8b 录制模式取消：操作按钮 listener 在所有取消路径都被摘掉', () => {
+    // 回归 bug：用户右键 / Esc 取消录制后，actionsBtn 上"取消" click listener 没摘掉，
+    // 下次点"操作"按钮还按 cancel handler 处理（toast 弹"已取消录制"），需再点一下才真打开菜单。
+    // 修：用 AbortController 在 _cleanup() 里统一 abort。
+    beforeEach(() => {
+        document.body.innerHTML = `
+            <div id="devicePreview" class="device-preview">
+                <div id="devicePreviewHeader"></div>
+                <div id="devicePreviewBody">
+                    <button id="btnDeviceScreenshot"></button>
+                    <button id="btnDeviceOpenImage"></button>
+                    <div class="device-preview__actions">
+                        <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button>
+                        <div id="deviceActionsMenu" class="device-tools-menu">
+                            <button class="device-tools-menu__item" data-action="tap">点击</button>
+                            <button class="device-tools-menu__item" data-action="swipe">滑动</button>
+                        </div>
+                    </div>
+                    <div class="device-preview__tools">…</div>
+                    <div id="devicePreviewStage">
+                        <canvas></canvas>
+                        <div id="devicePreviewSpinner" class="device-preview__spinner--hidden"></div>
+                    </div>
+                    <div id="devicePreviewInfobar">
+                        <div id="devicePreviewInfobarPick"><span></span></div>
+                        <div id="devicePreviewInfobarHover"><span></span></div>
+                        <div id="devicePreviewInfobarApp"><span></span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    it('右键取消录制后，再点"操作"按钮直接打开菜单（不弹已取消录制 toast）', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        const tapBtn = document.querySelector('[data-action="tap"]');
+        tapBtn.click();
+        // 进入录制：mask 已建、按钮文字变 "取消"
+        expect(document.querySelector('.device-record-mask')).toBeTruthy();
+        const actionsBtn = document.getElementById('btnDeviceActions');
+        const label = actionsBtn.querySelector('span[data-i18n]');
+        expect(label.getAttribute('data-i18n')).toBe('device.cancel');
+
+        // 先 pointerdown（左键）让 recording 置 true（用户原话：按下未松开时右键才生效）
+        const mask = document.querySelector('.device-record-mask');
+        const downEvt = new PointerEvent('pointerdown', {
+            bubbles: true, cancelable: true, button: 0, clientX: 50, clientY: 50,
+        });
+        mask.dispatchEvent(downEvt);
+
+        // 在 mask 上右键 → 取消（recording=true 时才生效）
+        const ctxEvt = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+        mask.dispatchEvent(ctxEvt);
+
+        // mask 已清、按钮文字恢复 "操作"
+        expect(document.querySelector('.device-record-mask')).toBeNull();
+        expect(label.getAttribute('data-i18n')).toBe('device.actions');
+
+        // 关键：再点"操作"按钮应直接打开菜单（不弹"已取消录制"）
+        actionsBtn.click();
+        const menu = document.getElementById('deviceActionsMenu');
+        expect(menu.hidden).toBe(false);
+    });
+
+    it('Esc 取消录制后，再点"操作"按钮直接打开菜单', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        const tapBtn = document.querySelector('[data-action="tap"]');
+        tapBtn.click();
+        expect(document.querySelector('.device-record-mask')).toBeTruthy();
+
+        // Esc → 取消
+        const escEvt = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+        document.dispatchEvent(escEvt);
+
+        expect(document.querySelector('.device-record-mask')).toBeNull();
+
+        // 再点"操作"应直接打开菜单
+        const actionsBtn = document.getElementById('btnDeviceActions');
+        actionsBtn.click();
+        const menu = document.getElementById('deviceActionsMenu');
+        expect(menu.hidden).toBe(false);
+    });
+
+    it('点"取消"按钮完成录制后，再点"操作"按钮直接打开菜单', async () => {
+        state.devicePreview.serial = 'S49';
+        state.devicePreview.width = 1080;
+        state.devicePreview.height = 2400;
+        const dp = await import('../../src/js/device-preview.js');
+        const bc = await import('../../src/js/backend-client.js');
+        const client = new bc.BackendClient({ host: 'h', port: 1 });
+        client._state = 'connected';
+        dp.registerClient(client);
+        dp.initDevicePreview();
+
+        const tapBtn = document.querySelector('[data-action="tap"]');
+        tapBtn.click();
+        expect(document.querySelector('.device-record-mask')).toBeTruthy();
+
+        // 点"取消"按钮（此时 actionsBtn 显示"取消"）→ 取消
+        const actionsBtn = document.getElementById('btnDeviceActions');
+        actionsBtn.click();
+        expect(document.querySelector('.device-record-mask')).toBeNull();
+
+        // 再点"操作"应直接打开菜单
+        actionsBtn.click();
+        const menu = document.getElementById('deviceActionsMenu');
+        expect(menu.hidden).toBe(false);
+    });
+});
+
+describe('device-preview refitStage：OCR / 匹配框 redraw 不弹 toast', () => {
+    // 回归 bug：完成 OCR / 图像匹配后，框已画好；拖动设备预览窗口宽度时，
+    // refitStage 每帧调用 _redrawOCRBoxesIfAny / _redrawMatchBoxesIfAny，
+    // 旧实现走 _drawOCRBoxes / _drawMatchBoxes（带 toast），结果每个 RAF tick 都弹
+    // "识别到 n 个文本区域" / "匹配到 n 处"，拖一次窗口会刷出几十个 toast。
+    // 修法：_redraw* 改调 _render*（静默 DOM 构造），_draw* 只在首次绘制 toast。
+    beforeEach(async () => {
+        document.body.innerHTML = `
+            <div id="devicePreview">
+                <div id="devicePreviewHeader">
+                    <span class="device-preview__resize"></span>
+                </div>
+                <div id="devicePreviewBody">
+                    <button id="btnDeviceScreenshot"></button>
+                    <button id="btnDeviceOpenImage"></button>
+                    <button id="btnDeviceOCR">OCR</button>
+                    <button id="btnDeviceActions"><span data-i18n="device.actions">操作</span><span class="dp-btn__arrow">▾</span></button><div id="deviceActionsMenu" class="device-tools-menu"><button id="btnDeviceClear" class="device-tools-menu__item" data-action="clear">清空</button></div>
+                    <div id="devicePreviewStage" class="device-preview__stage--empty">
+                        <canvas width="1080" height="2400" style="position:absolute;left:0;top:0;width:540px;height:1200px"></canvas>
+                        <div id="devicePreviewSpinner" class="device-preview__spinner device-preview__spinner--hidden"></div>
+                    </div>
+                    <div id="devicePreviewInfobar">
+                        <div id="devicePreviewInfobarPick"><span></span></div>
+                        <div id="devicePreviewInfobarHover"><span></span></div>
+                        <div id="devicePreviewInfobarApp"><span></span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        const dp = await import('../../src/js/device-preview.js');
+        dp.initDevicePreview();
+    });
+
+    // 拦截 state.toast 调用计数（_drawOCRBoxes / _drawMatchBoxes 走这个）
+    function spyToast() {
+        const toasts = [];
+        // monkey-patch state 模块的 toast（设备预览内 import { toast } from './state.js'）
+        // 因为是模块闭包里的命名导入，需要通过修改 export — Vitest 下用 vi.spyOn 不可，
+        // 直接改模块对象的属性不可（命名导入是只读绑定）。
+        // 折中：监听 state.js 模块的 toast 实际是 const toast = (msg) => {...}，
+        // 设备预览通过 named import 拿的是同一个引用。
+        // 我们用全局 spyOn state 模块的 toast（如果 state 把 toast 挂到了 state.* 上）
+        // — 实际没有，所以改用 monkey-patch 模块对象的 default export / 整个 module cache。
+        return toasts;
+    }
+
+    it('OCR 结果已设 + 多次 refitStage 等效（模拟拖拽 5 帧）— 不弹 toast', async () => {
+        // 通过 __test 钩子设置 _ocrResults，让 _redrawOCRBoxesIfAny 进入分支
+        const dp = await import('../../src/js/device-preview.js');
+        const stateMod = await import('../../src/js/state.js');
+        // device-preview 内通过 named import 拿到的 toast 是 state.js 模块顶层 const 绑定。
+        // Vitest jsdom 下没有直接 monkey-patch named import 的标准方案 — 改用
+        // vi.spyOn + state.js 的属性钩子（如果 toast 是 state.toast 形式则可 spy）。
+        // 当前 state.js 的 toast 是顶层 const — 改用 import * as all 重写：
+        // 最简方案：直接数 DOM 里 toast 容器的子元素数量。
+        const dp2 = dp;
+        // 设一个有 1 个 box 的结果（最简）
+        dp2.__test.setOcrResults([
+            { box: [[10, 20], [200, 20], [200, 60], [10, 60]], text: 'hello' },
+        ]);
+        // 模拟 refitStage 走 5 次（每次调 _redrawOCRBoxesIfAny）
+        const stage = document.getElementById('devicePreviewStage');
+        for (let i = 0; i < 5; i++) {
+            // 模拟 canvas 尺寸/位置变化 → redraw 路径会重建 box overlay
+            const canvas = stage.querySelector('canvas');
+            canvas.getBoundingClientRect = () => ({
+                left: 0 + i, top: 0, right: 540 + i, bottom: 1200,
+                width: 540 + i, height: 1200, x: 0, y: 0, toJSON: () => {},
+            });
+            stage.getBoundingClientRect = () => ({
+                left: 0, top: 0, right: 540 + i, bottom: 1200,
+                width: 540 + i, height: 1200, x: 0, y: 0, toJSON: () => {},
+            });
+            // 触发 redraw — 通过 dispatch pointermove 不好绕开 RAF；直接走 refitStage
+            // 等价路径：先调用 dp 内任意触发 refitStage 的入口。最简单是手动同步重新渲染。
+            // 这里用 dispatch 拖拽手柄的 pointermove：太复杂。改：直接调 _redrawOCRBoxesIfAny 不导出。
+            // 退而求其次：mock 一个 _drawOCRBoxes 触发（用 _renderOCRBoxes）也都不导出。
+            // 测试核心：通过 __test 改 _ocrResults 后，调红raw需要入口。
+            // → 改用实际拖拽手柄 path
+            const root = document.getElementById('devicePreview');
+            Object.defineProperty(root, 'getBoundingClientRect', {
+                value: () => ({ width: 540 + i, left: 0, right: 540 + i, top: 0, bottom: 28 }),
+                configurable: true,
+            });
+            const handle = document.querySelector('.device-preview__resize') || (() => {
+                const h = document.createElement('span');
+                h.className = 'device-preview__resize';
+                document.getElementById('devicePreviewHeader').appendChild(h);
+                return h;
+            })();
+            handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 540 }));
+            document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 540 + i }));
+            await new Promise(r => setTimeout(r, 30));   // flush RAF
+            document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+        }
+        // 框 overlay 仍然存在（redraw 没把数据清掉）
+        expect(stage.querySelector('.ocr-boxes-overlay')).toBeTruthy();
+        // 没产生任何 toast DOM（toast 是把 span 加到 body）
+        const toastEls = document.querySelectorAll('body > div, body > span');
+        // 简单 sanity：DOM 里没有 device-ocrFound 文本
+        expect(document.body.textContent).not.toMatch(/识别到 \d+ 个文本区域/);
+        dp2.__test.setOcrResults(null);
+    });
+
+    it('图像匹配结果已设 + 多次 refitStage 等效（模拟拖拽 5 帧）— 不弹 toast', async () => {
+        const dp = await import('../../src/js/device-preview.js');
+        dp.__test.setMatchResults([
+            { box: [[10, 20], [200, 20], [200, 60], [10, 60]], score: 0.92 },
+        ]);
+        const stage = document.getElementById('devicePreviewStage');
+        for (let i = 0; i < 5; i++) {
+            const root = document.getElementById('devicePreview');
+            Object.defineProperty(root, 'getBoundingClientRect', {
+                value: () => ({ width: 540 + i, left: 0, right: 540 + i, top: 0, bottom: 28 }),
+                configurable: true,
+            });
+            const canvas = stage.querySelector('canvas');
+            canvas.getBoundingClientRect = () => ({
+                left: 0 + i, top: 0, right: 540 + i, bottom: 1200,
+                width: 540 + i, height: 1200, x: 0, y: 0, toJSON: () => {},
+            });
+            stage.getBoundingClientRect = () => ({
+                left: 0, top: 0, right: 540 + i, bottom: 1200,
+                width: 540 + i, height: 1200, x: 0, y: 0, toJSON: () => {},
+            });
+            const handle = document.querySelector('.device-preview__resize') || (() => {
+                const h = document.createElement('span');
+                h.className = 'device-preview__resize';
+                document.getElementById('devicePreviewHeader').appendChild(h);
+                return h;
+            })();
+            handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 540 }));
+            document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 540 + i }));
+            await new Promise(r => setTimeout(r, 30));
+            document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+        }
+        expect(stage.querySelector('.match-boxes-overlay')).toBeTruthy();
+        expect(document.body.textContent).not.toMatch(/匹配到 \d+ 处/);
+        dp.__test.setMatchResults(null);
+    });
+
+    it('回归：匹配框在连续拖拽多帧时**实际跟随**尺寸更新（之前 _removeMatchBoxes 把 _matchResults 清空导致只第一帧更新）', async () => {
+        const dp = await import('../../src/js/device-preview.js');
+        const stage = document.getElementById('devicePreviewStage');
+        dp.__test.setMatchResults([
+            { box: [[10, 20], [200, 20], [200, 60], [10, 60]], score: 0.92 },
+        ]);
+
+        // 帧 0：设初始尺寸
+        let curW = 540;
+        const root = document.getElementById('devicePreview');
+        Object.defineProperty(root, 'getBoundingClientRect', {
+            value: () => ({ width: curW, left: 0, right: curW, top: 0, bottom: 28 }),
+            configurable: true,
+        });
+        const canvas = stage.querySelector('canvas');
+        const setRect = () => {
+            canvas.getBoundingClientRect = () => ({
+                left: 0, top: 0, right: curW, bottom: 1200,
+                width: curW, height: 1200, x: 0, y: 0, toJSON: () => {},
+            });
+            stage.getBoundingClientRect = () => ({
+                left: 0, top: 0, right: curW, bottom: 1200,
+                width: curW, height: 1200, x: 0, y: 0, toJSON: () => {},
+            });
+        };
+        setRect();
+
+        // 触发一次拖拽让 _redrawMatchBoxesIfAny 跑起来（_matchResults 已被 _renderMatchBoxes
+        // 第一次调用 _removeMatchBoxes 置 null 的旧 bug 就在这里炸）
+        const handle = document.querySelector('.device-preview__resize');
+        handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: curW }));
+        // 帧 1：拖到 600
+        curW = 600; setRect();
+        document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: curW }));
+        await new Promise(r => setTimeout(r, 30));
+        const overlay1 = stage.querySelector('.match-boxes-overlay');
+        const box1 = overlay1 && overlay1.querySelector('.match-box');
+        const width1 = box1 ? parseFloat(box1.style.width) : null;
+        // 帧 2：拖到 800（关键：之前 _matchResults 已被第一次 redraw 清掉，这次应不再更新）
+        curW = 800; setRect();
+        document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: curW }));
+        await new Promise(r => setTimeout(r, 30));
+        const overlay2 = stage.querySelector('.match-boxes-overlay');
+        const box2 = overlay2 && overlay2.querySelector('.match-box');
+        const width2 = box2 ? parseFloat(box2.style.width) : null;
+        document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+
+        // 框 overlay 仍在
+        expect(overlay2).toBeTruthy();
+        // 关键断言：第 2 帧的框宽度应**严格大于**第 1 帧的框宽度（画布缩放后框跟着放大）。
+        // 旧 bug 下 width2 === width1（_matchResults 在帧 1 已被置 null，帧 2 noop）。
+        expect(width1).toBeGreaterThan(0);
+        expect(width2).toBeGreaterThan(width1);
+        dp.__test.setMatchResults(null);
+    });
+});

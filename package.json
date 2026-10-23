@@ -10,7 +10,8 @@
     "dev:probe": "node scripts/dev-tools/probe.mjs",
     "dev:shot": "node scripts/dev-tools/shot.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build": "vite build"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

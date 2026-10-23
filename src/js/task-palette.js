@@ -261,7 +261,7 @@ export function initTaskPalette() {
     /* ---- Header click: vertical fold / unfold ---- */
     header.addEventListener('click', () => {
         _expanded = !_expanded;
-        if (_expanded && !paletteCards.length) initPaletteCards();
+        if (_expanded && !paletteCards.length) initPaletteCards({ silent: true });
         panel.classList.toggle('task-palette--collapsed', !_expanded);
     });
 
@@ -475,8 +475,13 @@ export function initTaskPalette() {
  * Load preset tasks (from server) and custom tasks (from user workspace),
  * merge them into paletteCards, and render.  Safe to call multiple times.
  * Loading order: preset first, custom overrides (same key wins).
+ *
+ * 选项 opts = { silent }：silent=true 时不 toast "卡片定义加载完成"。
+ * 由 _bootstrap 等"初始化完毕"路径传 true，避免每个触发点都弹 toast；
+ * 用户后续选目录触发的二次加载也 silent（不在 toast 流里刷屏）。
  */
-export async function initPaletteCards() {
+export async function initPaletteCards(opts = {}) {
+    const { silent = false } = opts;
     const [presetResult, customResult] = await Promise.all([
         loadPresetTasks(),
         loadCustomTasks(),
@@ -485,4 +490,5 @@ export async function initPaletteCards() {
     if (customResult.error) toast(customResult.error);
     mergeCards(presetResult.cards, customResult.cards);
     renderPaletteCards();
+    if (!silent) toast(t('toast.cardsLoaded'));
 }

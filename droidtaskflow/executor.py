@@ -53,6 +53,21 @@ def _find_task_func(task_name: str):
     return None
 
 
+def _wire_data(runtime: Runtime, wire_id: str):
+    """按 wire_id 取发布数据 {"enable", "value"}。
+
+    后缀匹配兜底：UI wire ID (t123.same) vs 发布 key (node_xxx.task.same)。
+    """
+    data = runtime.global_vars.get(wire_id)
+    if not data and '.' in wire_id:
+        suffix = '.' + wire_id.rsplit('.', 1)[1]
+        for k, v in runtime.global_vars.items():
+            if k.endswith(suffix):
+                data = v
+                break
+    return data
+
+
 def is_group_triggered(group, runtime: Runtime) -> bool:
     """操作组触发判定：在执行组内任何操作之前一次性判断
 
@@ -63,17 +78,46 @@ def is_group_triggered(group, runtime: Runtime) -> bool:
     if group.forced:
         return True
     for wire_id in group.external_inputs:
-        wire_data = runtime.global_vars.get(wire_id)
-        # 后缀匹配兜底：UI wire ID (t123.same) vs 发布 key (node_xxx.task.same)
-        if not wire_data and '.' in wire_id:
-            suffix = '.' + wire_id.rsplit('.', 1)[1]
-            for k, v in runtime.global_vars.items():
-                if k.endswith(suffix):
-                    wire_data = v
-                    break
+        wire_data = _wire_data(runtime, wire_id)
         if wire_data and wire_data.get("enable", False):
             return True
     return False
+
+
+def logic_task_should_run(task, runtime: Runtime) -> bool:
+    """LOGIC 卡片执行条件：输入连线中存在至少一个 enable=True 才执行；
+    无连线输入（纯配置参数）恒执行；输入 enable 全 False → 跳过。
+
+    与 operate 触发同源的失败传播：上游失败（enable=False）时该卡片不执行、
+    不发布结果 → 下游读不到输出（视为 False），失败沿连线链式传递。
+    """
+    wire_inputs = task.wire_inputs or {}
+    if not wire_inputs:
+        return True
+    for wire_id in wire_inputs.values():
+        wire_data = _wire_data(runtime, wire_id)
+        if wire_data and wire_data.get("enable", False):
+            return True
+    return False
+
+
+def publish_skipped_result(task, runtime: Runtime) -> None:
+    """LOGIC 卡片被跳过（输入 enable 全 False）时，把输出覆盖发布为 enable=False。
+
+    不能只是"不发布"：runtime.global_vars 里可能残留上一轮成功发布的
+    {'enable': True, ...} 旧值——下游操作组的 trigger 读旧值 enable=True 仍会触发，
+    造成死循环（遍历类节点：iterate 到末尾后 passthrough 被跳过，但组被 passthrough
+    的旧输出反复触发）。覆盖为 enable=False 与"读不到"对下游等价（都判 False），
+    且能清掉旧值。
+    """
+    if task.task_def is not None:
+        returns_meta = task.task_def._task_meta.get('returns', [])
+    else:
+        func = _find_task_func(task.task_name)
+        returns_meta = func._task_meta.get('returns', []) if func is not None else []
+    for rm in returns_meta:
+        key = f"{task.id}.{rm['name']}" if task.id else f"node_{task.node_id}.{task.task_name}.{rm['name']}"
+        runtime.global_vars[key] = {"enable": False, "value": None}
 
 
 def collect_task_inputs(task, runtime: Runtime) -> dict:
@@ -91,16 +135,7 @@ def collect_task_inputs(task, runtime: Runtime) -> dict:
         # 1. 尝试从连线获取
         wire_id = task.wire_inputs.get(param_name)
         if wire_id:
-            wire_data = runtime.global_vars.get(wire_id)
-            # Fallback: wire_id uses UI task ID (e.g. "t123.devices"), but results
-            # are published under "node_<nodeId>.<taskName>.<returnName>".
-            # Resolve by matching the return-name suffix across all published results.
-            if not wire_data and '.' in wire_id:
-                suffix = '.' + wire_id.rsplit('.', 1)[1]
-                for k, v in runtime.global_vars.items():
-                    if k.endswith(suffix):
-                        wire_data = v
-                        break
+            wire_data = _wire_data(runtime, wire_id)
             if wire_data and wire_data.get("enable", False):
                 inputs[param_name] = wire_data["value"]
                 continue
@@ -124,13 +159,11 @@ def publish_task_result(task, result: list, runtime: Runtime) -> None:
     """
     if result is None:
         return
-    # str is iterable but we need to treat it as a single return value
-    if isinstance(result, str):
+    # 非 list/tuple 一律按"单个返回值"处理。原实现只特判 str，但 dict 也是可迭代的
+    # （迭代出 keys）——任务返回单个 dict（如 {'enable': False, 'value': None}）时会被
+    # 错误拆成 keys，把 'enable' 字符串当结果值发布（历史 bug：下游 print 输出 "enable"）。
+    if not isinstance(result, (list, tuple)):
         result = [result]
-    try:
-        iter(result)
-    except TypeError:
-        return
 
     # 任务实例必须有 task_def 才能获取 return 名字
     if task.task_def is None:
@@ -207,7 +240,12 @@ def execute_node(node, runtime: Runtime) -> str | None:
     # 阶段 2: 逻辑分析
     # LOGIC 多列：按列主序执行——先列 0 全部（列内从上到下），再列 1 全部…
     # 稳定排序（(column, 原下标)），保证手写/乱序文件也按"列顺序"执行。
+    # 输入 enable 全 False → 跳过该卡片，并把输出覆盖为 enable=False
+    # （防残留旧值导致下游触发组死循环，见 publish_skipped_result）。
     for _, task in sorted(enumerate(node.logic_tasks), key=lambda p: (p[1].column, p[0])):
+        if not logic_task_should_run(task, runtime):
+            publish_skipped_result(task, runtime)
+            continue
         inputs = collect_task_inputs(task, runtime)
         result = _execute_task_callable(task, inputs, runtime)
         publish_task_result(task, result, runtime)

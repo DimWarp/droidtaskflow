@@ -6,6 +6,7 @@
 // 折叠时清空按钮自动 disabled（用户能看到位置，但不能误触）。
 
 import { t } from './i18n.js';
+import { toast } from './state.js';
 import { createCopyMenu } from './copy-menu.js';
 
 const LS_COLLAPSED = 'dtf:console_collapsed';
@@ -106,6 +107,11 @@ class ConsolePanel {
     this.scrolledUp = false;
     this._queue = [];            // [{cli, runId, label}]
     this._runCounter = 0;
+    // stdout 洪流节流：行先入缓冲，rAF 每帧最多批量渲染一次。
+    // 死循环脚本疯狂 print 时主线程不再被逐行 appendChild 占满，点击/取消能及时响应。
+    this._lineBuf = [];
+    this._flushScheduled = null;   // rAF id 或 null
+    this._maxLines = 5000;         // console 保留行数上限（防死循环输出无限撑爆 DOM/内存）
     this._buildDom();
     this._restoreUi();
   }
@@ -251,6 +257,9 @@ class ConsolePanel {
     this._currentLabel = label || t('console.run');
     this.cancelBtnEl.hidden = false;
     this.linesEl.innerHTML = '';
+    // 丢弃上一 run 残留缓冲与未执行的 rAF
+    if (this._flushScheduled != null) { cancelAnimationFrame(this._flushScheduled); this._flushScheduled = null; }
+    this._lineBuf = [];
     // 强制展开
     if (this.shell?.classList.contains('console-pane--collapsed')) {
       this.toggle();
@@ -267,6 +276,11 @@ class ConsolePanel {
     };
     const onError = (m) => {
       if (m.run_id !== this.runId) return;
+      // 后端拒绝（普通 run 因设备被自动化任务占用）→ 单独 toast 提示用户原因。
+      // 文案与 [ERROR] log 共存：toast 即时反馈，log 留档便于排查。
+      if (typeof m.message === 'string' && m.message === 'device busy') {
+        toast(t('automation.deviceBusy'));
+      }
       this._appendLine(`[ERROR] ${m.message}`);
       this._finishRun();
     };
@@ -282,6 +296,8 @@ class ConsolePanel {
   }
 
   _finishRun() {
+    // 先把缓冲里剩余的行渲染出来（exit 后不再有新输入）
+    this._flushLines();
     this.runId = null;
     this.cancelBtnEl.hidden = true;
     // 启动队列中的下一个
@@ -354,9 +370,29 @@ class ConsolePanel {
   }
 
   _appendLine(line) {
-    const div = document.createElement('div');
-    div.innerHTML = parseAnsi(line);
-    this.linesEl.appendChild(div);
+    // stdout 洪流节流：入缓冲 + rAF 批量渲染（每帧最多一次 DOM 写入）。
+    // 死循环疯狂 print 时主线程不再被逐行 appendChild 占满，取消按钮点击能及时处理。
+    this._lineBuf.push(line);
+    if (this._flushScheduled == null) {
+      this._flushScheduled = requestAnimationFrame(() => {
+        this._flushScheduled = null;
+        this._flushLines();
+      });
+    }
+  }
+
+  _flushLines() {
+    const lines = this._lineBuf;
+    this._lineBuf = [];
+    if (!lines.length) return;
+    // 批量写入：一次 insertAdjacentHTML（parseAnsi 已转义），比逐行 createElement 快一个量级
+    this.linesEl.insertAdjacentHTML('beforeend', lines.map(l => '<div>' + parseAnsi(l) + '</div>').join(''));
+    // 行数上限：超出丢弃最旧（防死循环输出无限撑大 DOM / 内存）
+    let over = this.linesEl.childElementCount - this._maxLines;
+    while (over-- > 0 && this.linesEl.firstElementChild) {
+      this.linesEl.removeChild(this.linesEl.firstElementChild);
+    }
+    this._autoFollow();
   }
 
   _autoFollow() {
@@ -365,9 +401,13 @@ class ConsolePanel {
   }
 
   _onCancelClick() {
-    if (this.cli && this.runId) {
-      this.cli.sendCancel(this.runId);
+    if (!this.cli || !this.runId) return;
+    // 防御：连接已断开时 sendCancel 会静默失败（"取消没反应"假象），明确提示
+    if (this.cli.state !== 'connected') {
+      toast(t('console.cancelNotConnected'));
+      return;
     }
+    this.cli.sendCancel(this.runId);
   }
 }
 

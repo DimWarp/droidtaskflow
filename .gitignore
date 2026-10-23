@@ -21,3 +21,9 @@ tmp-shots/
 # Headless Chrome profile (created by dev-tools repro scripts)
 scripts/dev-tools/.chrome-profile/
 AGENTS.md
+
+# 后端程序首次启动自动生成的默认配置模板（每台机器不同，不入库）
+config.yaml
+
+# 后端运行归档目录（本地调试残留）
+tmp/

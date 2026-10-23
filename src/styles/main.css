@@ -1276,9 +1276,15 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
 .backend-item__row:hover { background: var(--surface-mid); color: var(--on-surface); }
 .backend-item--selected > .backend-item__row {
     color: var(--on-surface); background: var(--accent-soft);
+    /* 焦点边框：淡蓝（介于 --accent 蓝和 --accent-soft 底之间），inset 1px 不撑高。
+       普通 hover（无焦点）不显。焦点+hover 时边框保留 + 背景变混合蓝灰 → 视觉层次清晰。 */
+    box-shadow: inset 0 0 0 1px #c4c0f0;
 }
 .backend-item--selected > .backend-item__row:hover {
-    background: var(--surface-mid);
+    /* 焦点 + hover 区分于单纯 hover：60% 焦点蓝（--accent-soft #ebe9ff）+ 40% hover 灰
+       （--surface-mid #e8e8ee）手算混合 ≈ #eae9f8（浅蓝灰），介于焦点和普通 hover 之间。
+       不用 color-mix：老浏览器不支持会导致规则被忽略、回退到普通 hover 灰。 */
+    background: #eae9f8;
 }
 .backend-dot {
     display: inline-block;
@@ -1340,10 +1346,15 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
 }
 .device-list__item {
     position: relative;
-    display: flex;
+    /* 用 grid 替代 flex: grid 项目默认按列 track 平分,label 走 1fr 自动占剩余列,
+       不依赖 flex-basis/grow/min-width 那些 flex item 微妙行为。 */
+    display: grid;
+    grid-template-columns: 7px 1fr;
     align-items: center;
-    gap: 6px;
-    padding: 3px 28px 3px 8px;       /* 右侧留空给 copy 按钮 */
+    column-gap: 6px;
+    /* 右侧 padding 极小：actions 容器浮在右侧、自身有渐变遮罩背景，label 文字溢出区域会被 actions 覆盖（与 .backend-actions 同款）。
+       这样短 serial（如 "S49…"）不会因 padding 过大被白白压缩，长 serial 溢出部分被 actions 渐变"化掉"。 */
+    padding: 3px 8px 3px 8px;
     margin: 1px 0;
     font-family: var(--font-ui);
     font-size: 12px;
@@ -1354,12 +1365,22 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     transition: background 100ms, color 100ms;
 }
 .device-list__item:hover { background: var(--surface-mid); color: var(--on-surface); }
-/* 悬浮复制按钮:与 backend-actions 同款 */
-.device-list__copy {
+/* M9: 设备条目 hover 按钮组（与 .backend-actions 同款：包容器 absolute 在最右 + 自身有渐变遮罩背景）。
+   子按钮 flex 横向排列；按钮区在 label 上层，label 文字溢出区被 actions 的 left 渐变"化掉"。 */
+.device-list__actions {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-    display: none;
+    display: none;        /* hover 才显 */
+    gap: 2px;
+    align-items: center;
+    padding-left: 6px;
+    /* 与 .backend-actions 一致：左透明渐变到 surface-mid 6px，hover 时整行变 surface-mid 时文字右端自然过渡 */
+    background: linear-gradient(to right, transparent, var(--surface-mid) 6px, var(--surface-mid) 100%);
+}
+.device-list__item:hover .device-list__actions { display: flex; }
+.device-list__actions > button {
     width: 18px; height: 18px;
     padding: 0;
+    display: inline-flex;
     align-items: center; justify-content: center;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -1369,14 +1390,20 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     flex-shrink: 0;
     transition: background 120ms, color 120ms, border-color 120ms;
 }
-.device-list__item:hover .device-list__copy { display: inline-flex; }
-.device-list__copy:hover { background: var(--surface-mid); color: var(--on-surface); border-color: var(--on-surface-mute); }
+.device-list__actions > button:hover {
+    background: var(--surface);
+    color: var(--on-surface);
+    border-color: var(--on-surface-mute);
+}
 .device-list__item--selected {
     color: var(--on-surface);
     background: var(--accent-soft);
+    /* 与后端条目同款：焦点即显示淡蓝边框（inset 1px），跟 hover 状态解耦。 */
+    box-shadow: inset 0 0 0 1px #c4c0f0;
 }
 .device-list__item--selected:hover {
-    background: var(--surface-mid);
+    /* 焦点 + hover 区分于单纯 hover：手算混合色 #eae9f8。 */
+    background: #eae9f8;
 }
 .device-list__dot {
     display: inline-block;
@@ -1389,7 +1416,8 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
 .device-list__dot[data-state="offline"]      { background: #adb5bd; }
 .device-list__dot[data-state="unauthorized"] { background: #ff8787; }
 .device-list__label {
-    flex: 1; min-width: 0;
+    /* grid item：在 1fr 列里自动平分剩余宽度。min-width:0 防止 ellipsis 被撑爆。 */
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1426,6 +1454,19 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     display: flex; flex-direction: column; gap: 4px;
     font-size: 11px; font-weight: 500; color: var(--on-surface-mute);
 }
+/* M9e: label 文字 + 必填红星 横向同行（包在 .dlg__label-row 里）
+   解决 column 布局下红星独立成行的问题。 */
+.dlg__label-row {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+}
+.dlg__required {
+    margin-left: 2px;
+    color: #ff6b6b;
+    font-weight: 600;
+    line-height: 1;
+}
 .dlg__body input {
     padding: 6px 8px;
     border: 1px solid var(--border);
@@ -1445,6 +1486,53 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
     padding: 6px 8px;
     background: rgba(255,107,107,0.1);
     border-radius: 4px;
+}
+.dlg__hint {
+    /* M9: wifi pair dialog 配对码下方的提示文字。复用现有 error / hint 色调（muted） */
+    color: color-mix(in srgb, var(--on-bg) 60%, transparent);
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 0 2px;
+    margin: -4px 0 4px;
+}
+.dlg__divider {
+    /* M9: wifi pair dialog 提示区上方的细分隔线，沿用 border 变量 */
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 4px 0 6px;
+}
+/* M9: wifi 设备条目按钮（已并入 .device-list__actions 容器，与 .backend-actions 同款：包容器 + 子按钮 flex 排列 + 渐变遮罩）。 */
+/* M9b: wifi-discover-dialog 设备列表（每个服务一行，点击选中带回主配对流程） */
+.wifi-discover-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 320px;
+    overflow-y: auto;
+}
+.wifi-discover-list__item {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+}
+.wifi-discover-list__item:hover {
+    background: var(--surface-mid);
+    border-color: var(--accent);
+}
+.wifi-discover-list__item:last-child { margin-bottom: 0; }
+.wifi-discover-list__name {
+    font-weight: 500;
+    color: var(--on-bg);
+    margin-bottom: 2px;
+    font-size: 13px;
+}
+.wifi-discover-list__addr {
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    color: var(--on-surface-mute, #888);
 }
 .dlg__footer {
     display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;
@@ -2450,4 +2538,84 @@ body.gv-dragging, body.gv-dragging * { cursor: grabbing !important; user-select:
 }
 .automation-editor__script-empty {
     font-size: 11px; color: var(--on-surface-mute); padding: 2px 0;
+}
+
+
+/* ── M8: 鼠标录制（点击/滑动） ─────────────────────────────────────────────────
+   蒙版比裁剪复制（rgba(0,0,0,.55)）更淡，方便看清预览图。
+   预览点区分起/终：起蓝（var(--accent)），终橙。
+   录制流程见 device-preview.js 的 _startMouseRecord。
+
+   M8b 视觉调整：
+   - 点从 16px 缩到 8px（用户要求"大小变小一点，变成当前大小的 1/2"）
+   - 分两个 overlay：line 在 z=7（低），dot 在 z=8（高），保证点显示在线上面 */
+.device-record-mask {
+    background: rgba(0, 0, 0, 0.3);
+    /* 蒙版接 pointerdown（开始录制），但放行右键/中键让 pan-decision 接管（透传给画布平移） */
+    touch-action: none;
+}
+.device-record-overlay {
+    /* 不接 pointer，mask 已接管；这里只画视觉 */
+}
+.device-record-dot {
+    position: absolute;
+    width: 8px; height: 8px;     /* M8b: 16 → 8（约当前 1/2） */
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    border: 1.5px solid #fff;    /* 边框同步缩窄一圈（视觉重量保持一致） */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+.device-record-dot--start { background: var(--accent); }
+.device-record-dot--end   { background: #ff9800; }   /* 橙色终点 */
+.device-record-line { pointer-events: none; }
+
+/* ── M8b: 输入面板（操作 → 输入） ─────────────────────────────────────────────
+   跟鼠标录制共用 mask（视觉一致：淡灰覆盖）。中间居中显示 textarea + 发送按钮。
+   蒙版背景 + z-index 与 device-record-mask 一致（直接复用 .device-record-mask）。 */
+.device-input-panel {
+    position: absolute;
+    z-index: 7;            /* 与 mouse-record line 层同 z，dot 层（8）才不会盖在 textarea 上 */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 72%;        /* 60% * 1.2 — 加宽 20%，多装一行"发送并Enter"按钮 */
+    max-width: 95%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.device-input-panel__textarea {
+    width: 100%;
+    min-height: 60px;
+    resize: vertical;
+    font: inherit;
+    color: var(--on-surface);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+}
+.device-input-panel__textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+.device-input-panel__actions {
+    display: flex;
+    flex-direction: column;     /* 发送 / 发送并Enter 两按钮竖排，宽度撑满 */
+    gap: 6px;
+}
+.device-input-panel__actions .dp-btn {
+    width: 100%;                /* 撑满面板宽度，避免两按钮并排拥挤 */
+}
+.device-input-panel__hint {
+    font-size: 11px;
+    color: var(--on-surface-mute, #888);
+    line-height: 1.4;
 }

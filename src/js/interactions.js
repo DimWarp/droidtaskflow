@@ -3,7 +3,7 @@
    ============================================================ */
 import { state, toast } from './state.js';
 import { render, realignAllExitPorts } from './render.js';
-import { drawWires, drawPreview, redrawPreview, wireDrag, updateHoverFromPointer, hoveredWire, setHoveredWire } from './wires.js';
+import { drawWires, drawPreview, redrawPreview, wireDrag, updateHoverFromPointer, hoveredWire, setHoveredWire, wireGeom } from './wires.js';
 import { shouldStartPan, panButtonEdge } from './pan-decision.js';
 import { toPythonDSL, fromPythonDSL, generateDroidtaskflowPy } from './datamapper.js';
 import JSZip from 'jszip';
@@ -188,10 +188,41 @@ export function initInteractions() {
     window.__centerOnFirstNode = centerOnFirstNode;
 
     /* ---------- Wire hover tracking ---------- */
+    // canvas 把 toolbar / task-palette / device-preview 都包了，这些面板盖在画布上层。
+    // 删除叉 (deleteBtnSVG z=998) 比面板 z (100/102) 高，hover 到一根线后，鼠标就算移到
+    // 画布空白区，只要 mid 落在面板矩形下，叉仍会透出。两种情况要清 hover：
+    //   1) e.target 在面板内 — pointermove 命中的事件目标
+    //   2) hoveredWire 的 midX/midY 投影到 viewport 后落在面板矩形内 — 鼠标在画布空地，
+    //      但叉的位置被面板挡着
+    const _hoverBlockerSelector = '.canvas-toolbar, .task-palette, .device-preview';
+    function _midHitsPanel() {
+        if (!hoveredWire) return false;
+        const g = wireGeom[hoveredWire];
+        if (!g || !g.ctrl) return false;
+        // de Casteljau at t=0.5 — 与 wires.js curveMidPoint 同步
+        let a = g.ctrl;
+        while (a.length > 1) {
+            const b = [];
+            for (let i = 0; i < a.length - 1; i++) b.push({ x: (a[i].x + a[i + 1].x) / 2, y: (a[i].y + a[i + 1].y) / 2 });
+            a = b;
+        }
+        const cr = document.querySelector('.canvas').getBoundingClientRect();
+        const sx = (a[0].x + state.panX) * state.zoom + cr.left;
+        const sy = (a[0].y + state.panY) * state.zoom + cr.top;
+        for (const el of document.querySelectorAll(_hoverBlockerSelector)) {
+            const r = el.getBoundingClientRect();
+            if (sx >= r.left && sx <= r.right && sy >= r.top && sy <= r.bottom) return true;
+        }
+        return false;
+    }
     document.querySelector('.canvas').addEventListener('pointermove', e => {
         // 拖动/平移/拖线中（有键按下）不追踪 hover：否则每帧对全部线算 distToBezier，
         // 且 hover 翻转会触发一次全量 drawWires（绕过 skipInternal），拖节点时帧被拖垮。
         if (e.buttons !== 0) return;
+        if (e.target.closest(_hoverBlockerSelector) || _midHitsPanel()) {
+            if (hoveredWire) { setHoveredWire(null); drawWires(); }
+            return;
+        }
         updateHoverFromPointer(e.clientX, e.clientY);
     });
     document.querySelector('.canvas').addEventListener('pointerenter', e => {
@@ -470,7 +501,7 @@ export function initInteractions() {
             // Refresh project list first so it appears immediately
             refreshProjectList();
             // Load palette in background (non-blocking)
-            initPaletteCards().catch(e => { /* palette is non-critical */ });
+            initPaletteCards({ silent: true }).catch(e => { /* palette is non-critical */ });
             initClipboard();
             initDragAndDrop();
         }
@@ -608,8 +639,8 @@ export function initInteractions() {
 
     /* ---------- Startup ---------- */
     loadToolFiles().catch(e => console.warn('loadToolFiles failed:', e));
-    // Pre-load preset tasks early so DEFS is populated before any render
-    initPaletteCards().catch(e => console.warn('initPaletteCards failed:', e));
+    // 卡片定义加载已挪到 _bootstrap 里：等 pyodide ready 后显式 await initPaletteCards()，
+    // 完成后 toast "任务卡片定义加载完成"。这里不再 fire-and-forget。
     showProjectOverlay();
     showStartupDialog();
 }

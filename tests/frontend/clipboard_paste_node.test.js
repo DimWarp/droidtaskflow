@@ -100,3 +100,50 @@ describe('clipboard: 粘贴节点到画布相机中心', () => {
         expect(pasted.y).toBe(240);
     });
 });
+
+describe('clipboard: 粘贴节点 id 前缀按 type 区分', () => {
+    // 回归 bug：粘贴 goto 节点被无脑写 'n' + Date.now()，导致后续跟点击添加的 'g' + Date.now() 不一致。
+    // 影响：序列化的 Python 脚本里 goto 节点 id 错乱 / 反序列化后类型丢失 / 引用查找失败。
+    beforeEach(() => {
+        state.nodes = [];
+        state.zoom = 1;
+        state.panX = 0;
+        state.panY = 0;
+        clipboard.item = null;
+        clipboard.type = null;
+        setFocusedNodeId(null);
+        document.body.innerHTML = `<div class="canvas" style="width:800px;height:600px"></div>`;
+        document.querySelector('.canvas').getBoundingClientRect = () => ({
+            left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0,
+        });
+    });
+
+    it('粘贴普通节点 → id 以 "n" 开头', () => {
+        const node = makeNode({ type: 'normal' });
+        state.nodes.push(node);
+        clipboard.item = node;
+        clipboard.type = 'node';
+        setFocusedNodeId(node.id);
+        initClipboard();
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true }));
+        const pasted = state.nodes[1];
+        expect(pasted.id).toMatch(/^n\d+$/);
+    });
+
+    it('粘贴 goto 节点 → id 以 "g" 开头（与 btnAddGoto 保持一致）', () => {
+        const node = makeNode({ id: 'g_original', type: 'goto', name: 'goto', w: 320,
+                                inPorts: ['in'], target: null });
+        state.nodes.push(node);
+        clipboard.item = node;
+        clipboard.type = 'node';
+        setFocusedNodeId(node.id);
+        initClipboard();
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true }));
+        const pasted = state.nodes[1];
+        // 关键：粘贴 goto 必须保持 'g' 前缀，否则跟点击添加的 goto 节点 id 不一致
+        expect(pasted.type).toBe('goto');
+        expect(pasted.id).toMatch(/^g\d+$/);
+        // 不应被写成 'n' 前缀（老 bug）
+        expect(pasted.id.startsWith('n')).toBe(false);
+    });
+});

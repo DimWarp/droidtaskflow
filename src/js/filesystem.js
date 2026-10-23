@@ -261,7 +261,9 @@ export async function getPyodide() {
     if (_pyodideLoading) return _pyodideLoading;
     toast(t('toast.pyInit'));
     _pyodideLoading = (async () => {
-        const py = await loadPyodide({ indexURL: '/pyodide/' });
+        // BASE_URL 由 Vite 注入：dev 下为 '/'，build 下为 vite.config.js 的 base
+        // （GitHub Pages 子路径 '/droidtaskflow/'）。用绝对 '/pyodide/' 会在子路径部署时 404。
+        const py = await loadPyodide({ indexURL: `${import.meta.env.BASE_URL}pyodide/` });
         await py.runPythonAsync(`
 import sys
 from types import ModuleType
@@ -582,7 +584,7 @@ function extractFunctionSource(code, funcName) {
 /** Fetch and parse the built-in preset tasks from the server. */
 export async function loadPresetTasks() {
     try {
-        const resp = await fetch('/preset_task.py');
+        const resp = await fetch(`${import.meta.env.BASE_URL}preset_task.py`);
         if (!resp.ok) {
             console.warn('preset_task.py not found (HTTP ' + resp.status + ')');
             return { cards: [], error: null };

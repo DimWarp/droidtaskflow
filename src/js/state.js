@@ -34,6 +34,10 @@ export const state = {
     // deviceListByBackend:    {[backendId]: Device[]}
     selectedDeviceByBackend: {},
     deviceListByBackend: {},
+    // M9c: 后端能力 per backend（启动期由 backend_caps 消息推送）
+    // adbPairSupportedByBackend: {[backendId]: bool}
+    //   决定"添加无线设备"按钮是否显示；缺省 false（caps 未到达前安全默认值）
+    adbPairSupportedByBackend: {},
 };
 
 /* ============================================================
@@ -58,6 +62,53 @@ export function setSelectedDevice(backendId, serial) {
 export function getSelectedDevice(backendId) {
     if (!backendId) return undefined;
     return state.selectedDeviceByBackend[backendId];
+}
+
+/**
+ * 统一的"焦点 + 可用性"快照，供右上角运行、设备预览按钮、工具菜单等共享。
+ * 解耦"焦点是哪两个"和"它俩是否可用"——所有需要"后端+设备均非 null 且均可用"
+ * 的 UI 都通过 focus.ready 判断，避免每个模块自己拼装。
+ *
+ * 用法:
+ *   const f = getFocus();
+ *   if (f.ready) { ... }  // 后端+设备均就绪
+ *   else { ... disable ... }
+ *
+ * @param {string|null} [backendId]    不传则用 state.selectedBackendId
+ * @param {object|null} [client]       BackendClient 实例；不传则只查 state
+ * @param {Array|null}  [devices]      当前后端的 device list；不传则从 state 读
+ * @param {string|null} [fallbackSerial]  设备 serial 兜底来源：device-preview 模块
+ *        自己的 state.devicePreview.serial。统一焦点优先用 selectedDeviceByBackend；
+ *        当 caller 走 device-preview 路径时传 fallbackSerial，绕过 selectedDeviceByBackend 也能算 deviceReady。
+ * @returns {{backendId, deviceSerial, backendReady, deviceReady, ready}}
+ */
+export function getFocus(backendId, client, devices, fallbackSerial = null) {
+    if (!backendId) backendId = state.selectedBackendId;
+    return _computeFocus(backendId, client, devices, fallbackSerial);
+}
+
+function _computeFocus(backendId, client, devices, fallbackSerial) {
+    const deviceSerial = backendId && state.selectedDeviceByBackend[backendId]
+        ? state.selectedDeviceByBackend[backendId]
+        : (fallbackSerial || null);
+    const backendReady = !!(client && client.state === 'connected');
+    // 设备"可用"= 选了 serial + 后端已连接。设备是否真的"在线"（state=device）交给
+    // adb 命令失败时的 toast 错误处理；前端这一层用"selected + connected"做粗筛，
+    // 避免选了离线持久化无线设备就完全没反应（用户需要能看到失败 toast 才知道原因）。
+    const deviceReady = !!deviceSerial && backendReady;
+    return {
+        backendId: backendId || null,
+        deviceSerial: deviceSerial || null,
+        backendReady,
+        deviceReady,
+        get ready() { return this.backendReady && this.deviceReady; },
+    };
+}
+
+// device-preview 模块自带的 serial（在没走 selectedDeviceByBackend 路径时也用）
+// getFocus 第 4 个参数直接读它，绕过统一焦点的限制，避免误判。
+export function getFocusFromSerial(client, serial) {
+    return _computeFocus(null, client, null, serial);
 }
 
 export function loadSelectedDeviceFromStorage() {

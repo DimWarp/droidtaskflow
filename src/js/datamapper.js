@@ -26,6 +26,40 @@ function pyVal(v) {
     return JSON.stringify(v);
 }
 
+/**
+ * JS 值 → Python 字面量（递归）：null → None、boolean → True/False，
+ * string/number 用 JSON.stringify（双引号字符串与数字在 Python/JSON 中字面量一致），
+ * 数组/对象递归展开（键用双引号，JSON 对象键即合法 Python dict 键）。
+ */
+function toPyLiteral(v) {
+    if (v === null || v === undefined) return 'None';
+    if (typeof v === 'boolean') return v ? 'True' : 'False';
+    if (typeof v === 'number' || typeof v === 'string') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(toPyLiteral).join(', ') + ']';
+    if (typeof v === 'object') {
+        return '{' + Object.entries(v).map(([k, val]) => JSON.stringify(k) + ': ' + toPyLiteral(val)).join(', ') + '}';
+    }
+    return JSON.stringify(String(v));
+}
+
+/**
+ * global_var 值序列化（toPythonDSL 用）。
+ * string/number/boolean：字符串字面量（现状）；
+ * dict/list：把用户输入的 JSON 文本解析后转 Python 字面量（含嵌套 true/false/null → True/False/None），
+ * 运行时 global_vars[name] 直接是 dict/list 对象；
+ * dict/list 留空（无默认值）→ 输出对应类型的空字面量（{} / []）；
+ * JSON 解析失败（用户输入非法）→ 回退为字符串字面量兜底，不破坏生成脚本。
+ */
+export function serializeGVValue(gv) {
+    const raw = gv.value != null ? String(gv.value) : '';
+    if (gv.type === 'dict' || gv.type === 'list') {
+        if (!raw.trim()) return gv.type === 'dict' ? '{}' : '[]';
+        try { return toPyLiteral(JSON.parse(raw)); }
+        catch (e) { return JSON.stringify(raw); }
+    }
+    return JSON.stringify(raw);
+}
+
 /* ----------------------------------------------------------
    MERGED droidtaskflow.py BUNDLE
    ---------------------------------------------------------- */
@@ -332,7 +366,7 @@ export function toPythonDSL(state) {
 
     // Global variables
     (state.globalVars || []).forEach(gv => {
-        lines.push(`global_var("${gv.name}", "${gv.type}", ${JSON.stringify(gv.value != null ? String(gv.value) : '')})`);
+        lines.push(`global_var("${gv.name}", "${gv.type}", ${serializeGVValue(gv)})`);
     });
     if (state.globalVars && state.globalVars.length) lines.push('');
 
@@ -472,7 +506,11 @@ export function fromPythonDSL(pyDict, state) {
         state.globalVars = Object.values(pyDict.global_vars).map(gv => ({
             name: gv.name,
             type: gv.type || 'string',
-            value: gv.default != null ? String(gv.default) : '',
+            // dict/list：default 是 Python 解析后的对象 → 转回 JSON 文本给 UI 回显；
+            // 其它类型维持字符串（现状）
+            value: (gv.type === 'dict' || gv.type === 'list')
+                ? (gv.default != null ? JSON.stringify(gv.default) : '')
+                : (gv.default != null ? String(gv.default) : ''),
             // device_id 是系统变量, 不论 project 文件里写没写 fixed 字段, 都强制 type-locked.
             // 原因: backend dsl.py:global_var() 不接受 fixed 参数, 文件里根本没有这个字段;
             // !!gv.fixed 永远是 false. 其它用户变量照旧走文件里读到的 fixed (目前也只会是 false).

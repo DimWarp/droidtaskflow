@@ -1,7 +1,7 @@
 /* ============================================================
    DEVICE PREVIEW — 后端按需截图 + 本地图片 + 选点器
    ============================================================ */
-import { state, toast } from './state.js';
+import { state, toast, getFocus } from './state.js';
 import { BackendClient } from './backend-client.js';
 import { t, onLanguageChange } from './i18n.js';
 
@@ -58,6 +58,15 @@ export function setActiveSerial(serial) {
     syncScreenshotButton();
 }
 
+// 同步焦点（用于 sidebar / backend-panel 在切换设备时通知 device-preview）
+// 第 4 个参数直接用 fallbackSerial 让 getFocus 不依赖 selectedDeviceByBackend 也能
+// 算出 deviceReady（向后兼容 device-preview 自己的 state.devicePreview.serial 路径）。
+// 这样 device-preview 的 syncScreenshotButton 用 getFocus 的统一判定，
+// 跟右上角运行 / 设备操作菜单共享同一份"后端+设备均可用"语义。
+function _activeFocus() {
+    return getFocus(undefined, _client, undefined, state.devicePreview.serial);
+}
+
 export function collapseDevicePreview() {
     document.getElementById('devicePreview').classList.add('device-preview--collapsed');
     state.devicePreview.folded = true;
@@ -95,6 +104,15 @@ function _tryRegisterClient() {
     }
 }
 
+/* 测试钩子：让测试可以直接设置 OCR / 图像匹配结果，验证 refitStage 拖拽时的 toast 行为。
+   生产路径不会触发：OCR / 匹配结果只在后端 reply 时由 _drawOCRBoxes / _drawMatchBoxes 设置。 */
+export const __test = {
+    setOcrResults(results) { _ocrResults = results; },
+    setMatchResults(results) { _matchResults = results; },
+    get ocrResults() { return _ocrResults; },
+    get matchResults() { return _matchResults; },
+};
+
 function _wireClient(client) {
     if (!client || typeof client.setDeviceScreenshotHandler !== 'function') return;
     client.setDeviceScreenshotHandler((evt) => {
@@ -127,6 +145,14 @@ function _wireClient(client) {
             // applied=true 不弹 toast（操作成功，无需打扰）
         });
     }
+    // M8: 点击/滑动 reply 错误时 toast 提示（成功静默）。同 power 走 setDeviceActionHandler。
+    if (typeof client.setDeviceActionHandler === 'function') {
+        client.setDeviceActionHandler((msg) => {
+            if (!msg || msg.ok !== true) {
+                toast(t('device.actionFail', { msg: msg && msg.error ? msg.error : '' }));
+            }
+        });
+    }
     // client state 变化（disconnected/connecting/connected）时刷新截图按钮 + 工具菜单禁用态
     // 同样用覆盖式 API（on('state', ...) 是 push，多次 _wireClient 会累积 state listener）。
     if (typeof client.setStateHandler === 'function') {
@@ -143,14 +169,16 @@ function _wireClient(client) {
 function syncScreenshotButton() {
     const btn = document.getElementById('btnDeviceScreenshot');
     if (!btn) return;
-    // 可点条件:已选中 device serial + 后端 client 已注册 + client.ws 已 connected + 无 in-flight 请求
+    // 统一焦点判定：后端+设备均非 null 且均可用 + 无 in-flight 截图请求。
+    // 用 fallbackSerial 传 state.devicePreview.serial — device-preview 模块的 selected
+    // 路径不依赖 selectedDeviceByBackend（向后兼容）。
     const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
-    const wsReady = !!(client && client.state === 'connected');
-    const disabled = !state.devicePreview.serial || !wsReady || state.devicePreview.fetching;
+    const f = getFocus(undefined, client, undefined, state.devicePreview.serial);
+    const disabled = !f.ready || state.devicePreview.fetching;
     btn.disabled = disabled;
     // stage 空态提示文字：无选中设备 → "请选中一个可用的设备"
     const stage = document.getElementById('devicePreviewStage');
-    if (stage) stage.classList.toggle('device-preview__stage--no-device', !state.devicePreview.serial);
+    if (stage) stage.classList.toggle('device-preview__stage--no-device', !f.deviceSerial);
     // 悬浮提示已移除：截图按钮不再挂原生 title / 自定义 tooltip（原两套样式重复且不需要）
 }
 
@@ -172,20 +200,24 @@ function showError(message) {
 
 function syncActionsMenu() {
     // 操作下拉菜单项的 disabled 态：
-    //   clear          — 只需预览图（无图时禁用）
-    //   power-on/off   — 需后端已连接 + 选中设备（不发预览图，所以跟 OCR/图像匹配同档）
+    //   clear            — 只需预览图（无图时禁用）
+    //   home/menu/back   — 后端 + 设备焦点（keyevent=3/82/4）
+    //   tap/swipe        — 后端 + 设备焦点（鼠标录制 → adb input tap/swipe）
+    // 设备操作菜单（电源/主页/返回/菜单/点击/滑动/输入）可用条件 = 焦点 ready
+    // （后端连接 + 设备在线）。clear 只要求有图。
     const menu = document.getElementById('deviceActionsMenu');
     if (!menu) return;
     const hasImage = !!state.devicePreview.source;
     const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
-    const backendReady = !!(client && client.state === 'connected');
-    const hasDevice = !!state.devicePreview.serial;
+    const f = getFocus(undefined, client, undefined, state.devicePreview.serial);
     for (const item of menu.querySelectorAll('.device-tools-menu__item')) {
         const action = item.dataset.action;
         if (action === 'clear') {
             item.disabled = !hasImage;
-        } else if (action === 'power-on' || action === 'power-off') {
-            item.disabled = !(backendReady && hasDevice);
+        } else if (action === 'home' || action === 'menu' || action === 'back'
+                   || action === 'tap' || action === 'swipe' || action === 'input'
+                   || action === 'power-on' || action === 'power-off') {
+            item.disabled = !f.ready;
         }
     }
 }
@@ -343,6 +375,10 @@ function renderStage(blob, width, height) {
     syncToolMenuItems();
     removeOCRBoxes();
     _removeMatchBoxes();
+    // 显式重置缓存：新图加载后旧 OCR/匹配结果已失效，不重置会被 refitStage 误用
+    // （_removeMatchBoxes 已不再隐式清 _matchResults，否则 redraw 路径下次拿不到数据）。
+    _ocrResults = null;
+    _matchResults = null;
 
     // 重建 spinner(被 stage.innerHTML='' 清掉了,id/class 不变 syncSpinner 才能继续工作)
     const sp = document.createElement('div');
@@ -959,10 +995,13 @@ function _initToolsMenu() {
         }
     });
 
-    // 点击菜单外部 / Esc 关闭
+    // 点击菜单外部 / Esc 关闭。注意：用 toolsBtn.contains(e.target) 判定"是否点在按钮上"，
+    // 不是 e.target === toolsBtn — 按钮内部可能点击的是 span / svg 元素，e.target 不是按钮本身。
+    // 旧逻辑"e.target === toolsBtn"会在 mousedown 阶段误判为"点在外部"而 hide()，
+    // 随后 click 阶段 toggle() 又展开 → 出现"按下闭合、松开又展开"的闪烁。
     document.addEventListener('mousedown', (e) => {
         if (menu.hidden) return;
-        if (menu.contains(e.target) || e.target === toolsBtn) return;
+        if (menu.contains(e.target) || toolsBtn.contains(e.target)) return;
         hide();
     });
     document.addEventListener('keydown', (e) => {
@@ -971,15 +1010,6 @@ function _initToolsMenu() {
 }
 
 // ── 操作下拉菜单 ────────────────────────────────────────────────────
-// 发送设备按键（keycode=26=POWER 等）：通过 BackendClient.requestDeviceKeyevent，
-// 未连接 / 缺设备 → 返回 false 让 caller 弹 toast。
-function _sendDeviceKeyevent(keycode) {
-    const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
-    if (!client || client.state !== 'connected') return false;
-    const serial = state.devicePreview.serial;
-    if (!serial) return false;
-    return client.requestDeviceKeyevent(serial, keycode);
-}
 
 // M7: 幂等电源开关。后端先查屏幕状态再决定是否按 POWER keyevent，返回 {ok, applied}
 //   applied=false 表示幂等跳过（已是目标状态），applied=true 表示实际按了 key。
@@ -997,6 +1027,391 @@ function _sendDevicePower(action) {
     }
     return client.requestDevicePower(serial, action);
 }
+
+// M8: 通用 keyevent 操作（home=3、menu=82、back=4）。通过 BackendClient.requestDeviceKeyevent，
+// 未连接 / 缺设备 → 返回 false 让 caller 弹 toast。
+function _sendKeyevent(keycode) {
+    const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
+    if (!client || client.state !== 'connected') return false;
+    const serial = state.devicePreview.serial;
+    if (!serial) return false;
+    return client.requestDeviceKeyevent(serial, keycode);
+}
+
+// M8: 返回键 = KEY['BACK']=4
+function onBackClick() { return _sendKeyevent(4); }
+// M8b: 主页键 = KEY['HOME']=3
+function onHomeClick() { return _sendKeyevent(3); }
+// M8b: 菜单键 = KEY['MENU']=82
+function onMenuClick() { return _sendKeyevent(82); }
+
+// M8: 鼠标录制核心（点击 + 滑动共用）
+// 流程：覆盖灰色蒙版 → pointerdown 记起点（同时建起点 + 滑动模式的 end+line）→
+//        pointermove 更新预览（swipe）→ pointerup 完成录制、清除蒙版 + 预览元素。
+// mode='tap'  → pointerup 立即完成，x=x1, y=y1
+// mode='swipe' → pointerup 完成，x1/y1=起按下点，x2/y2=松开点，duration=按下到松开毫秒
+//
+// 坐标转换：screen 坐标 → stage 内部坐标 → image 原图坐标。
+// 屏幕坐标 - stageRect.left = stage 内部 x；再 / stageCanvas.width * image.width = 真实原图 x。
+// 超出预览区域：line 端点 + endDot 视觉 clamp 到 stage 边界（线视觉截断），
+//   但实际发给后端的坐标**不 clamp**（按用户原话："如果鼠标超出预览区域，
+//   则线截断到边框区域，终止预览点也保持在预览区域内，注意线保持连接到终止预览点"
+//   ——视觉截断，原值不截）。
+//
+// 关键 M8b 交互改动：
+//   - 不在 mask 一上就创建起 点：起点 + 滑动模式的 end+线都在 pointerdown 时才创建
+//     （用户要求"不要在左上角显示一个初始点"）。
+//   - 拖到 stage 外：右键 或 Esc → 清除所有预览、退出录制模式（用户要求）。
+//   - 操作按钮临时变"取消"，点击同样退出录制（用户要求）。
+//   - 线 z-index 比点低，保证点显示在线上（用户要求）。
+function _startMouseRecord(mode) {
+    const stage = document.getElementById('devicePreviewStage');
+    const canvas = stage && stage.querySelector('canvas');
+    if (!stage || !canvas) {
+        toast(t('device.recordNoPreview'));
+        return;
+    }
+    const stageRect = stage.getBoundingClientRect();
+    const cRect = canvas.getBoundingClientRect();
+    const imgW = state.devicePreview.width || cRect.width;
+    const imgH = state.devicePreview.height || cRect.height;
+    if (!imgW || !imgH) {
+        toast(t('device.recordNoImageSize'));
+        return;
+    }
+
+    // 蒙版：覆盖整个 stage（比裁剪复制的 0.55 淡，方便看预览图）
+    const mask = document.createElement('div');
+    mask.className = 'device-record-mask';
+    mask.style.cssText = 'position:absolute;inset:0;z-index:6;cursor:crosshair;';
+    stage.appendChild(mask);
+
+    // 预览元素容器：分两层
+    //   1) 线层（device-record-overlay-line, z=7）—— 比点层低，line 渲染在下面
+    //   2) 点层（device-record-overlay,     z=8）—— 点在 line 上面
+    // 两层都在 mask 之上；mask 接管 pointerdown
+    const lineLayer = document.createElement('div');
+    lineLayer.className = 'device-record-overlay device-record-overlay--line';
+    lineLayer.style.cssText = 'position:absolute;inset:0;z-index:7;pointer-events:none;';
+    stage.appendChild(lineLayer);
+    const overlay = document.createElement('div');
+    overlay.className = 'device-record-overlay device-record-overlay--dot';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:8;pointer-events:none;';
+    stage.appendChild(overlay);
+
+    // 滑动的 SVG line（先创建空容器，pointerdown 后写入第一个 line 元素）
+    let lineSvg = null;
+
+    let startDot = null;     // 起点（pointerdown 才创建）
+    let endDot = null;       // 滑动模式终点
+    let startX = null, startY = null, startTime = 0;
+    let recording = false;   // 是否在拖动中（pointerdown 之后）
+
+    const _clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const _toImage = (clientX, clientY) => {
+        // clientX/Y → stage 内部 → 原图
+        const sx = clientX - stageRect.left;
+        const sy = clientY - stageRect.top;
+        return {
+            x: Math.round(sx / cRect.width * imgW),
+            y: Math.round(sy / cRect.height * imgH),
+        };
+    };
+    const _placeDot = (dot, clientX, clientY) => {
+        // dot 中心对齐到 client 位置；clamp 到 stage 视觉内
+        const cx = _clamp(clientX, stageRect.left, stageRect.right);
+        const cy = _clamp(clientY, stageRect.top, stageRect.bottom);
+        dot.style.left = (cx - stageRect.left) + 'px';
+        dot.style.top = (cy - stageRect.top) + 'px';
+    };
+    const _ensureLine = () => {
+        if (lineSvg) return;
+        lineSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        lineSvg.setAttribute('class', 'device-record-line');
+        lineSvg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;';
+        lineLayer.appendChild(lineSvg);
+    };
+    const _drawLine = (x1, y1, x2, y2) => {
+        // 线两端都 clamp 到 stage 视觉内（保持视觉连接）
+        const cx1 = _clamp(x1, stageRect.left, stageRect.right);
+        const cy1 = _clamp(y1, stageRect.top, stageRect.bottom);
+        const cx2 = _clamp(x2, stageRect.left, stageRect.right);
+        const cy2 = _clamp(y2, stageRect.top, stageRect.bottom);
+        lineSvg.innerHTML = `<line x1="${cx1 - stageRect.left}" y1="${cy1 - stageRect.top}" `
+            + `x2="${cx2 - stageRect.left}" y2="${cy2 - stageRect.top}" `
+            + 'stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 3" />';
+    };
+
+    const _restoreActionsButton = () => {
+        const btn = document.getElementById('btnDeviceActions');
+        if (btn) {
+            const label = btn.querySelector('span[data-i18n]');
+            if (label) {
+                label.setAttribute('data-i18n', 'device.actions');
+                label.textContent = t('device.actions');
+            }
+        }
+        // 同步 syncActionsMenu 重新计算 disabled 态
+        syncActionsMenu();
+    };
+
+    // 一次性 "操作"→"取消" 按钮的监听：所有取消路径（onCancelClick / RMB / Esc / onUp 正常完成）
+    // 都最终走 _cleanup()，abort() 会一次性摘掉 actionsBtn 上的 click 监听，
+    // 避免右键 / Esc 取消后留下幽灵 handler、下次点 "操作" 还按取消处理。
+    const _cancelAbort = new AbortController();
+
+    const _cleanup = (restoreBtn = true) => {
+        try { mask.remove(); } catch (_) {}
+        try { lineLayer.remove(); } catch (_) {}
+        try { overlay.remove(); } catch (_) {}
+        mask.removeEventListener('pointerdown', onDown);
+        mask.removeEventListener('contextmenu', onContextMenu);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+        document.removeEventListener('keydown', onKeydown, true);
+        _cancelAbort.abort();   // 一次性清掉 actionsBtn 上的 click 监听
+        canvas.style.cursor = '';
+        if (restoreBtn) _restoreActionsButton();
+    };
+
+    const onContextMenu = (e) => {
+        // 右键 = 取消录制（用户在拖动中可按右键放弃）。仅当已开始 recording 时生效。
+        if (!recording) return;
+        e.preventDefault();
+        e.stopPropagation();
+        recording = false;
+        toast(t('device.recordCancelled'));
+        _cleanup();
+    };
+
+    const onKeydown = (e) => {
+        // Esc = 取消录制（全局捕获，确保焦点在别处时也生效）
+        if (e.key !== 'Escape') return;
+        if (!recording) {
+            // mask 还没被按下 → 仍处于"进入录制"等用户点击的状态
+            // 此时也允许 Esc 退出（无任何预览点 / 线可清，但用户预期是"放弃录制"）
+            _cleanup();
+            return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        recording = false;
+        toast(t('device.recordCancelled'));
+        _cleanup();
+    };
+
+    const onDown = (e) => {
+        // 只响应左键（pointerdown 鼠标录制）；
+        // 右键/中键 → onContextMenu 走取消路径
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        startX = e.clientX; startY = e.clientY;
+        startTime = performance.now();
+        recording = true;
+        // 用户要求：起点在按下时才创建（不在左上角预显示）
+        startDot = document.createElement('div');
+        startDot.className = 'device-record-dot device-record-dot--start';
+        overlay.appendChild(startDot);
+        _placeDot(startDot, startX, startY);
+        if (mode === 'swipe') {
+            endDot = document.createElement('div');
+            endDot.className = 'device-record-dot device-record-dot--end';
+            overlay.appendChild(endDot);
+            _placeDot(endDot, startX, startY);
+            _ensureLine();
+            _drawLine(startX, startY, startX, startY);
+        }
+    };
+
+    const onMove = (e) => {
+        if (!recording) return;        // pointerdown 之前不响应
+        if (mode === 'swipe') {
+            _placeDot(endDot, e.clientX, e.clientY);
+            _drawLine(startX, startY, e.clientX, e.clientY);
+        }
+    };
+
+    const onUp = (e) => {
+        if (!recording) return;        // 屏蔽无效的 pointerup（用户中途按了别键之类）
+        recording = false;
+        const duration = Math.round(performance.now() - startTime);
+        const start = _toImage(startX, startY);
+        let result;
+        if (mode === 'tap') {
+            result = { x: start.x, y: start.y };
+        } else {
+            const end = _toImage(e.clientX, e.clientY);
+            result = { x1: start.x, y1: start.y, x2: end.x, y2: end.y, duration };
+        }
+        _cleanup();
+        const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
+        const serial = state.devicePreview.serial;
+        if (!client || !serial) return;
+        if (mode === 'tap') {
+            if (!client.requestDeviceTap(serial, result.x, result.y)) {
+                toast(t('device.actionFail'));
+            }
+        } else {
+            if (!client.requestDeviceSwipe(serial, result.x1, result.y1, result.x2, result.y2, result.duration)) {
+                toast(t('device.actionFail'));
+            }
+        }
+    };
+
+    mask.addEventListener('pointerdown', onDown);
+    mask.addEventListener('contextmenu', onContextMenu);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    document.addEventListener('keydown', onKeydown, true);
+    // 临时改光标，提示用户进入录制模式
+    canvas.style.cursor = 'crosshair';
+
+    // 操作按钮临时变 "取消"（用户要求"操作-点击/滑动 进入录制模式后，
+    // 操作按钮暂时变成取消，点击后放弃录制并退出录制"）。
+    const actionsBtn = document.getElementById('btnDeviceActions');
+    if (actionsBtn) {
+        const label = actionsBtn.querySelector('span[data-i18n]');
+        if (label) {
+            label.setAttribute('data-i18n', 'device.cancel');
+            label.textContent = t('device.cancel');
+        }
+        // 用 AbortController 注册一次性 click 监听（capture 阶段）：
+        // _cleanup() 里 abort() 一次性摘掉，无论走 onCancelClick / RMB / Esc / 正常完成。
+        actionsBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            recording = false;
+            toast(t('device.recordCancelled'));
+            _cleanup();
+        }, { capture: true, signal: _cancelAbort.signal });
+    }
+}
+
+// "操作"按钮在 mask 进入录制后临时变"取消"。点"取消" → _startMouseRecord 内部 handler 兜底。
+// 这个工具函数给 mask 外的代码提供"主动放弃录制"的入口（例如 syncActionsMenu 在 client
+// 状态变化时检测到 mask 还在就跑一次清理）。
+function _cancelMouseRecord() {
+    const stage = document.getElementById('devicePreviewStage');
+    if (!stage) return;
+    const mask = stage.querySelector('.device-record-mask');
+    if (mask) mask.click();   // 触发 _startMouseRecord 内部的 cancel handler（按右键 / Esc 路径）
+}
+
+// M8b: 输入操作（操作 → 输入面板）
+// 流程：覆盖一层与点击/滑动相同的灰色蒙版 → 中心显示 textarea + 发送按钮 →
+//       用户输入文字后回车或点发送 → 后端 am broadcast ADBKeyboard → 退出。
+// 点击蒙版空白（textarea 之外）= 取消输入（与点击/滑动录制"按右键取消"对称）。
+function _startInputMode() {
+    const stage = document.getElementById('devicePreviewStage');
+    const canvas = stage && stage.querySelector('canvas');
+    if (!stage || !canvas) {
+        toast(t('device.recordNoPreview'));
+        return;
+    }
+
+    // 同一蒙版样式（视觉上跟点击/滑动录制一致：灰色 + z-index 6）
+    const mask = document.createElement('div');
+    mask.className = 'device-record-mask';
+    mask.style.cssText = 'position:absolute;inset:0;z-index:6;cursor:crosshair;';
+    stage.appendChild(mask);
+
+    // 输入面板（z-index 7，蒙版之上）
+    const panel = document.createElement('div');
+    panel.className = 'device-input-panel';
+    panel.innerHTML = `
+        <textarea class="device-input-panel__textarea" rows="3"
+                  placeholder="${t('device.inputPlaceholder')}"></textarea>
+        <div class="device-input-panel__actions">
+            <button class="device-input-panel__send dp-btn" data-i18n="device.inputSend">${t('device.inputSend')}</button>
+            <button class="device-input-panel__send-enter dp-btn" data-i18n="device.inputSendEnter">${t('device.inputSendEnter')}</button>
+        </div>
+        <div class="device-input-panel__hint">${t('device.inputNeedAdbKeyboard')}</div>
+    `;
+    stage.appendChild(panel);
+
+    const ta = panel.querySelector('.device-input-panel__textarea');
+    const sendBtn = panel.querySelector('.device-input-panel__send');
+    const sendEnterBtn = panel.querySelector('.device-input-panel__send-enter');
+
+    // 关闭整个输入面板。
+    // mode='send'      → 发文本
+    // mode='sendEnter' → 发文本 + 紧跟 Enter keyevent=66（提交表单 / 触发搜索按钮）
+    // mode='cancel'    → 关闭，不发
+    const close = (mode) => {
+        const text = ta ? ta.value : '';
+        const trimmed = text && text.trim();
+        try { mask.remove(); } catch (_) {}
+        try { panel.remove(); } catch (_) {}
+        // 同步 syncActionsMenu 重新计算 disabled 态
+        syncActionsMenu();
+        if (mode === 'cancel' || !trimmed) return;
+        const client = _client || (typeof window !== 'undefined' ? window.__dtfBackendClient : null);
+        const serial = state.devicePreview.serial;
+        if (!client || !serial) return;
+        const sent = client.requestDeviceInputText(serial, text);
+        if (!sent) {
+            toast(t('device.actionFail'));
+            return;
+        }
+        if (mode === 'sendEnter') {
+            // 紧跟 Enter 键（keycode 66）。失败也提示，但面板已关、不阻塞用户。
+            client.requestDeviceKeyevent(serial, 66);
+            toast(t('device.inputSentEnter'));
+        } else {
+            toast(t('device.inputSent'));
+        }
+    };
+
+    // 点击蒙版空白 = 取消（不发送）
+    mask.addEventListener('click', (e) => {
+        if (e.target === mask) close('cancel');
+    });
+    // 蒙版右键 = 取消
+    mask.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        close('cancel');
+    });
+    // 发送按钮（只发文本）
+    sendBtn.addEventListener('click', () => {
+        const text = ta.value;
+        if (!text || !text.trim()) {
+            toast(t('device.inputEmpty'));
+            return;
+        }
+        close('send');
+    });
+    // 发送并 Enter（发文本 + Enter key）
+    sendEnterBtn.addEventListener('click', () => {
+        const text = ta.value;
+        if (!text || !text.trim()) {
+            toast(t('device.inputEmpty'));
+            return;
+        }
+        close('sendEnter');
+    });
+    // Enter 发送（不按 Shift+Enter 避免插入换行时被吞）—— 等同于"发送并Enter"，
+    // 浏览器原生 textarea 的 Enter 键常用于"提交"，跟"发送并Enter"语义一致。
+    ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendEnterBtn.click();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            close('cancel');
+        }
+    });
+    // 同步 syncActionsMenu 状态（输入操作禁用，避免重复打开）
+    syncActionsMenu();
+    // 自动 focus
+    setTimeout(() => ta.focus(), 0);
+}
+
+// "操作"按钮展开一个下拉，容纳清空 / 电源开 / 电源关。
+// 以后加操作只需在 HTML 的 #deviceActionsMenu 里加一个 <button data-action="...">，
+// 并在这里的 dispatch + syncActionsMenu 加一个分支。
 
 // "操作"按钮展开一个下拉，容纳清空 / 电源开 / 电源关。
 // 以后加操作只需在 HTML 的 #deviceActionsMenu 里加一个 <button data-action="...">，
@@ -1027,7 +1442,8 @@ function _initActionsMenu() {
         toggle();
     });
 
-    // 菜单项点击 → 清空 / 电源开 / 电源关（幂等：后端查屏幕状态再决定是否按 POWER）
+    // 菜单项点击 → 清空 / 电源开 / 电源关 / 主页 / 返回 / 菜单 / 点击 / 滑动 / 输入
+    // （幂等：后端查屏幕状态再决定是否按 POWER）
     menu.addEventListener('click', (e) => {
         const item = e.target.closest('.device-tools-menu__item');
         if (!item || item.disabled) return;
@@ -1035,6 +1451,18 @@ function _initActionsMenu() {
         const action = item.dataset.action;
         if (action === 'clear') {
             onClearClick();
+        } else if (action === 'home') {
+            onHomeClick();
+        } else if (action === 'back') {
+            onBackClick();
+        } else if (action === 'menu') {
+            onMenuClick();
+        } else if (action === 'tap') {
+            _startMouseRecord('tap');
+        } else if (action === 'swipe') {
+            _startMouseRecord('swipe');
+        } else if (action === 'input') {
+            _startInputMode();
         } else if (action === 'power-on') {
             _sendDevicePower('on');
         } else if (action === 'power-off') {
@@ -1042,10 +1470,12 @@ function _initActionsMenu() {
         }
     });
 
-    // 点击菜单外部 / Esc 关闭
+    // 点击菜单外部 / Esc 关闭。注意：用 actionsBtn.contains(e.target) 判定"是否点在按钮上"，
+    // 不是 e.target === actionsBtn — 按钮内部可能点击的是 span / svg 元素，e.target 不是按钮本身。
+    // 旧逻辑会在 mousedown 阶段误判为"点在外部"而 hide()，随后 click 阶段 toggle() 又展开。
     document.addEventListener('mousedown', (e) => {
         if (menu.hidden) return;
-        if (menu.contains(e.target) || e.target === actionsBtn) return;
+        if (menu.contains(e.target) || actionsBtn.contains(e.target)) return;
         hide();
     });
     document.addEventListener('keydown', (e) => {
@@ -1070,6 +1500,8 @@ function _enterCropMode() {
     // 进入裁剪前一步清除所有框（OCR + 图像匹配），不再临时隐藏——裁剪完成或取消后不恢复
     removeOCRBoxes();
     _removeMatchBoxes();
+    _ocrResults = null;          // 显式重置缓存（见 renderStage 同款注释）
+    _matchResults = null;
 
     // 独立灰蒙版层，覆盖在主 canvas 上方（原图 canvas 永不修改）
     const mask = document.createElement('canvas');
@@ -1309,6 +1741,7 @@ function _startOCR(score) {
 
     // 先清空图像匹配框（如有），与图像匹配流程先清 OCR 框对称
     _removeMatchBoxes();
+    _matchResults = null;        // 显式重置（_removeMatchBoxes 不再隐式清缓存）
 
     // 从 canvas 导出 base64 PNG
     let pngB64;
@@ -1375,18 +1808,28 @@ function removeOCRBoxes() {
 }
 
 function _redrawOCRBoxesIfAny() {
+    // 拖拽预览窗宽度时 refitStage 调用本函数 → 重建框以匹配新尺寸。
+    // 用 _renderOCRBoxes 静默渲染（不弹 toast），避免每个 RAF tick 都 toast。
     const stage = document.getElementById('devicePreviewStage');
     const canvas = stage && stage.querySelector('canvas');
-    if (canvas && _ocrResults) _drawOCRBoxes(canvas, _ocrResults);
+    if (canvas && _ocrResults) _renderOCRBoxes(canvas, _ocrResults);
 }
 
 function _drawOCRBoxes(canvas, results) {
+    // 首次绘制（OCR 后端 reply 后）：toast 提示
     removeOCRBoxes();
     if (!results.length) {
         toast(t('device.ocrNoText'));
         return;
     }
     _ocrResults = results;
+    _renderOCRBoxes(canvas, results);
+    toast(t('device.ocrFound', { n: results.length }));
+}
+
+// 实际 DOM 构造（与 toast 解耦，refitStage 拖拽时复用此函数）
+function _renderOCRBoxes(canvas, results) {
+    removeOCRBoxes();
 
     const stage = canvas.parentElement;
     const overlay = document.createElement('div');
@@ -1435,7 +1878,6 @@ function _drawOCRBoxes(canvas, results) {
     canvas._ocrBoxes = boxData;
     canvas._ocrTooltip = tooltip;
     canvas._ocrOverlay = overlay;
-    toast(t('device.ocrFound', { n: results.length }));
 }
 
 // ── 图像匹配 ────────────────────────────────────────────────────────
@@ -1633,22 +2075,35 @@ function _removeMatchBoxes() {
     _matchActiveBoxData = null;
     const old = stage.querySelector('.match-boxes-overlay');
     if (old) old.remove();
-    _matchResults = null;
+    // 注意：不重置 _matchResults 缓存 — _renderMatchBoxes（redraw 路径）会调本函数清 DOM，
+    // 但需要 _matchResults 保留才能在 refitStage 后续帧里继续重建框。
+    // 缓存清理由 caller 负责：onClearClick（清空预览）/ _runImageMatch（新匹配前）
+    // 会显式设 _matchResults = null / 新结果。
 }
 
 function _redrawMatchBoxesIfAny() {
+    // 拖拽预览窗宽度时 refitStage 调用本函数 → 重建框以匹配新尺寸。
+    // 用 _renderMatchBoxes 静默渲染（不弹 toast），避免每个 RAF tick 都 toast。
     const stage = document.getElementById('devicePreviewStage');
     const canvas = stage && stage.querySelector('canvas');
-    if (canvas && _matchResults) _drawMatchBoxes(canvas, _matchResults);
+    if (canvas && _matchResults) _renderMatchBoxes(canvas, _matchResults);
 }
 
 function _drawMatchBoxes(canvas, results) {
+    // 首次绘制（图像匹配后端 reply 后）：toast 提示
     _removeMatchBoxes();
     if (!results.length) {
         toast(t('device.noMatch'));
         return;
     }
     _matchResults = results;
+    _renderMatchBoxes(canvas, results);
+    toast(t('device.matchFound', { n: results.length }));
+}
+
+// 实际 DOM 构造（与 toast 解耦，refitStage 拖拽时复用此函数）
+function _renderMatchBoxes(canvas, results) {
+    _removeMatchBoxes();
 
     const stage = canvas.parentElement;
     const overlay = document.createElement('div');
@@ -1696,5 +2151,4 @@ function _drawMatchBoxes(canvas, results) {
     canvas._matchBoxes = boxData;
     canvas._matchTooltip = tooltip;
     canvas._matchOverlay = overlay;
-    toast(t('device.matchFound', { n: results.length }));
 }

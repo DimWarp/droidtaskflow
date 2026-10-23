@@ -26,5 +26,9 @@ const staticFontCachePlugin = () => ({
 });
 
 export default defineConfig({
+  // GitHub Pages 部署在 https://dimwarp.github.io/droidtaskflow/ 子路径下。
+  // base 必须与之匹配，否则构建产物里的 /assets/... 会解析到域名根目录而 404
+  // （表现为：页面出来但样式全丢）。dev server 下 base 同样生效，无副作用。
+  base: '/droidtaskflow/',
   plugins: [staticFontCachePlugin()],
 });

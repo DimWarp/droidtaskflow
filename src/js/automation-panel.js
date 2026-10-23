@@ -382,6 +382,10 @@ function _buildTaskCard(task) {
     ? `<span class="automation__task-msg" data-msg="${escapeHtml(lastMsg)}">${escapeHtml(_truncate(lastMsg, 40))}</span>`
     : '';
   const next = nextFireTime(task.schedule, new Date());
+  // 上次运行时间：从 _history 里 lastRunOf 拿 started_at（ISO 字符串）。无历史时显示 —。
+  const lastRunTxt = last && last.started_at
+    ? formatTime(new Date(last.started_at))
+    : '—';
 
   card.innerHTML = `
     <div class="automation__task-head">
@@ -397,6 +401,9 @@ function _buildTaskCard(task) {
     <div class="automation__task-meta">
       <span>${t('automation.device')}: ${escapeHtml(devs.join(', ') || '—')}</span>
       <span class="automation__next">${t('automation.nextRun')}: ${next ? formatTime(next) : '—'}</span>
+    </div>
+    <div class="automation__task-meta">
+      <span>${t('automation.lastRun')}: ${escapeHtml(lastRunTxt)}</span>
     </div>
     <div class="automation__task-status">
       ${queued ? `<span class="automation__result automation__result--queued">● ${t('automation.statusQueued')}</span>` : ''}
@@ -791,6 +798,11 @@ async function openEditor(task) {
           </select>
         </label>
         <div id="ae-sched" class="automation-editor__sched"></div>
+        <label><span>${t('automation.timeout')}</span>
+          <input id="ae-timeout" type="number" min="1" step="1"
+            value="${escapeHtml(task && task.timeout_seconds ? String(task.timeout_seconds) : '')}"
+            placeholder="${escapeHtml(t('automation.timeoutPlaceholder'))}">
+        </label>
         <div class="automation-editor__field">
           <span class="automation-editor__label">${t('automation.script')}</span>
           <div id="ae-script-src" class="ae-script-src" role="radiogroup">
@@ -1113,6 +1125,16 @@ async function openEditor(task) {
     if (!built) return;
 
     const payload = { type: task ? MSG.UPDATE : MSG.ADD, name, schedule, devices: devicesArr, vars, enabled: document.getElementById('ae-enabled').checked };
+    // 超时：未填（空字符串/非正整数）→ 不发字段，后端视为"使用 config.yaml 默认值"。
+    // 编辑旧任务时若用户把已填值清空 → 发 null 让后端清掉自定义超时回到默认。
+    const timeoutRaw = document.getElementById('ae-timeout').value.trim();
+    if (timeoutRaw) {
+        const n = Number(timeoutRaw);
+        if (Number.isFinite(n) && n > 0) payload.timeout_seconds = Math.floor(n);
+        else { toast(t('automation.timeoutInvalid')); return; }
+    } else if (task && task.timeout_seconds) {
+        payload.timeout_seconds = null;
+    }
     if (task) payload.task_id = task.id;
     if (!built.keep) {   // "后端"项（保留后端脚本）时不重发 bundle / script
       payload.script = built.script;

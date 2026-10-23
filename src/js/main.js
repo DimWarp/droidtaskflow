@@ -5,9 +5,10 @@
 // and declared with @font-face in src/styles/main.css. Per typography spec §0.1:
 //   --font-ui   -> Maple Mono (UI text: buttons, titles, labels, toasts, dialogs)
 //   --font-code -> Maple Mono (code preview area; same family, future-proof token)
-import { state, toast, getSelectedDevice } from './state.js';
-import { getDirHandle } from './filesystem.js';
+import { state, toast, getFocus } from './state.js';
+import { getDirHandle, getPyodide } from './filesystem.js';
 import { initInteractions } from './interactions.js';
+import { initPaletteCards } from './task-palette.js';
 import { initBackendsPanel, getClientById, autoDiscoverLocalBackends } from './backend-panel.js';
 import { getSelectedBackendId } from './backend-client.js';
 import { initConsolePanel, getConsolePanel } from './console-panel.js';
@@ -56,10 +57,12 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 async function onRunClick() {
-    const id = getSelectedBackendId();
-    if (!id) { toast(t('toast.selectBackendLeft')); return; }
-    const cli = getClientById(id);
-    if (!cli || cli.state !== 'connected') { toast(t('tooltip.backendNotConnected')); return; }
+    // 统一焦点判定：后端+设备均非 null 且均可用。焦点内任何一个不满足都给出对应 toast 提示。
+    const cli = getClientById(getSelectedBackendId());
+    const f = getFocus(getSelectedBackendId(), cli);
+    if (!f.backendId) { toast(t('toast.selectBackendLeft')); return; }
+    if (!f.backendReady) { toast(t('tooltip.backendNotConnected')); return; }
+    if (!f.deviceSerial || !f.deviceReady) { toast(t('toast.selectDevice')); return; }
     if (!state.nodes || state.nodes.length === 0) { toast(t('toast.projectEmpty')); return; }
     let mainPy;
     try { mainPy = toPythonDSL(state); }
@@ -74,9 +77,7 @@ async function onRunClick() {
     // M1: 把当前后端的选中 device_id 注入 global_args。
     // 后端 runner 把它拼成 CLI args (`--device_id=...`)，子进程入口再写回
     // runtime.global_vars；task 层通过 resolve_serial(global_vars) 拿值。
-    const selectedDevice = getSelectedDevice(id);
-    const global_args = {};
-    if (selectedDevice) global_args.device_id = selectedDevice;
+    const global_args = { device_id: f.deviceSerial };
     try { cli.sendRun(zip, runId, undefined, global_args); }
     catch (e) { toast(t('toast.sendFail', { msg: e && e.message ? e.message : e })); }
 }
@@ -117,6 +118,19 @@ function _bootstrap() {
         refreshProjectList();
     });
     setLang(getLang());
+
+    // 卡片定义初始化：先等 pyodide ready（getPyodide 内部已 toast "pyReady"），
+    // 再加载 preset + custom 卡片定义并合并到 paletteCards，最后 toast 完成。
+    // 此前是 fire-and-forget 在 initInteractions 末尾触发，偶发跟 pyodide 启动 race
+    // 导致 preset 加载失败 / 卡片显示未定义。
+    (async () => {
+        try {
+            await getPyodide();
+            await initPaletteCards();
+        } catch (e) {
+            console.warn('initPaletteCards failed:', e);
+        }
+    })();
 
     // 自动发现本地后端（fire-and-forget；老用户已有配置会直接跳过）
     autoDiscoverLocalBackends().then((id) => {

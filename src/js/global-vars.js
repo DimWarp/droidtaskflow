@@ -21,6 +21,21 @@ function _getWidthMirror() {
     return _widthMirror;
 }
 
+/**
+ * dict/list 初始化值校验：JSON 语法合法 + 顶层类型匹配变量类型。
+ * 返回 null = 通过；'json' = JSON 语法错误；'type' = 顶层类型不匹配
+ * （dict 须为纯对象、list 须为数组；null / 标量 / 数组↔对象不匹配都拒绝）。
+ * 非 dict/list 类型恒通过。导出为纯函数便于单测。
+ */
+export function validateGVValue(type, text) {
+    if (type !== 'dict' && type !== 'list') return null;
+    let v;
+    try { v = JSON.parse(text); }
+    catch (e) { return 'json'; }
+    if (type === 'dict') return (v !== null && typeof v === 'object' && !Array.isArray(v)) ? null : 'type';
+    return Array.isArray(v) ? null : 'type';
+}
+
 /* ═══════════════════════════════════════════════════
    全局变量拖拽排序
    ═══════════════════════════════════════════════════ */
@@ -170,7 +185,7 @@ export function renderGlobalVars() {
         if (!gv.fixed) {
             const typeSel = document.createElement('select');
             typeSel.className = 'gv-item__type';
-            ['string', 'number', 'boolean'].forEach(t => {
+            ['string', 'number', 'boolean', 'dict', 'list'].forEach(t => {
                 const opt = document.createElement('option');
                 opt.value = t; opt.textContent = t;
                 if (gv.type === t) opt.selected = true;
@@ -180,13 +195,16 @@ export function renderGlobalVars() {
                 capture();
                 state.globalVars[idx].type = typeSel.value;
                 state.dirty = true;
+                // dict/list 的值输入是多行 textarea，切换类型后重建当前项
+                renderGlobalVars();
+                syncToolbar();
             });
             item.appendChild(typeSel);
         }
 
         // Value input
         // Placeholder 是动态的：光标闪烁（focused）→ "初始化值"，
-        // 未输入（blurred 且 value 为空）→ "命令传参"。
+        // 未输入（blurred 且 value 为空）→ "命令传参"（dict/list 显示 JSON 示例）。
         // 这两个文案把 "由谁提供值" 的意图直接写在 UI 上，
         // 旧版的 "脚本传入" 勾选框已去掉（M1 决策：CLI args 优先于项目值；
         // 项目值为空即表示走 CLI 通道）。
@@ -202,14 +220,24 @@ export function renderGlobalVars() {
         //   按 W3C spec 这会抑制后续 mousedown 触发, 导致鼠标点画布空白时
         //   input 不会自动 blur, document 上的 mousedown listener 也收不到。
         //   在 capture 阶段监听 pointerdown 可以早于 canvas handler 跑, 不受 preventDefault 影响。
-        const valInput = document.createElement('input');
-        valInput.className = 'gv-item__value';
-        valInput.type = 'text';
+        //
+        // dict/list：值输入用多行 textarea（自动高度，超限内部滚动），提交时校验 JSON，
+        // 非法则 toast 提示并恢复编辑前值（避免坏值进入序列化）。
+        const isMulti = gv.type === 'dict' || gv.type === 'list';
+        const valInput = isMulti
+            ? Object.assign(document.createElement('textarea'), { rows: 1, wrap: 'off' })
+            : Object.assign(document.createElement('input'), { type: 'text' });
+        valInput.className = isMulti ? 'gv-item__value gv-item__value--multi' : 'gv-item__value';
         valInput.value = gv.value != null ? String(gv.value) : '';
-        valInput.placeholder = t('gv.cmdPlaceholder');   // 默认 = blurred 态
+        const blurPlaceholder = isMulti ? t('gv.noCliPlaceholder') : t('gv.cmdPlaceholder');
+        valInput.placeholder = blurPlaceholder;   // 默认 = blurred 态
         // 自适应宽度: 用隐藏 mirror span 测量文本精确像素宽度 (含 padding/border),
-        // 直接设为 input.style.width。空值 (显示 placeholder) 时也按 placeholder 宽度算,
+        // 直接设为 valInput.style.width。空值 (显示 placeholder) 时也按 placeholder 宽度算,
         // 不设下限 —— 用户要求"正好能显示提示字符的宽度", 再额外 +5px 右边留白。
+        // 多行输入（dict/list）：宽度按"最宽一行"自适应 —— 若按整体文本测宽，
+        // 输入少量字时框很窄，配合软换行会折成两行；textarea 用 white-space:pre
+        // 禁止软换行（\n 换行保留），宽度=最宽行则每行都完整显示，不会出现
+        // 垂直滚动条/伪两行。
         const _RIGHT_PADDING_EXTRA_PX = 5;
         const updateValueWidth = () => {
             const mirror = _getWidthMirror();
@@ -224,16 +252,29 @@ export function renderGlobalVars() {
             mirror.style.borderLeftWidth = cs.borderLeftWidth;
             mirror.style.borderRightWidth = cs.borderRightWidth;
             mirror.style.boxSizing = cs.boxSizing;
-            mirror.textContent = valInput.value || valInput.placeholder || '';
+            const text = valInput.value || valInput.placeholder || '';
+            const widest = text.split('\n').reduce((a, b) => a.length > b.length ? a : b, '');
+            mirror.textContent = widest;
             valInput.style.width = (mirror.getBoundingClientRect().width + _RIGHT_PADDING_EXTRA_PX) + 'px';
         };
+        // dict/list 多行输入：内容驱动高度（1 行起）。
+        // scrollHeight 是内容高（含 padding），border-box 下 height 需再补上下边框高，
+        // 否则内容区被 border 吃掉 2px → 溢出出现滚动区（overflow:hidden 会裁掉末行底部）。
+        const autosizeValue = () => {
+            if (!isMulti) return;
+            const cs = getComputedStyle(valInput);
+            const borderV = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+            valInput.style.height = 'auto';
+            valInput.style.height = (valInput.scrollHeight + borderV) + 'px';
+        };
         updateValueWidth();
+        autosizeValue();
         // 字体可能还没下载完 (MapleMono 6-7MB woff2, font-display: swap).
         // 首次测量会用 fallback 字体宽度, 比真实字体窄. 等字体就绪后再测一次.
         // document.fonts.ready 是 Promise: 字体已加载则立即 resolve, 未加载则等加载完.
         // 重复注册多个 .then 都接同一个 Promise, 字体就绪时一起触发, 每个 closure 修正自己的 valInput。
         if (document.fonts && document.fonts.ready) {
-            document.fonts.ready.then(() => updateValueWidth());
+            document.fonts.ready.then(() => { updateValueWidth(); autosizeValue(); });
         }
         // Esc 恢复目标 = 进入编辑时看到的值（focus 时快照）, 用 let 方便 focus 重写
         let originalValue = valInput.value;
@@ -242,7 +283,20 @@ export function renderGlobalVars() {
             if (!valInput.value) valInput.placeholder = t('gv.initPlaceholder');
         });
         valInput.addEventListener('blur', () => {
-            if (!valInput.value) valInput.placeholder = t('gv.cmdPlaceholder');
+            if (!valInput.value) valInput.placeholder = blurPlaceholder;
+            // dict/list 校验：值变了且校验失败（语法错误或类型不匹配）→ toast + 恢复编辑前值
+            // （Esc 恢复后值未变则跳过）
+            const gv = state.globalVars[idx];
+            if (gv && isMulti && valInput.value && valInput.value !== originalValue) {
+                const err = validateGVValue(gv.type, valInput.value);
+                if (err) {
+                    toast(t(err === 'json'
+                        ? 'toast.gvInvalidJson'
+                        : (gv.type === 'dict' ? 'toast.gvDictType' : 'toast.gvListType')));
+                    valInput.value = originalValue;
+                    gv.value = originalValue;
+                }
+            }
             // blur 后也要按当前 value/placeholder 重算一次 size,
             // 因为 focus 期间 placeholder 切换为 "初始化值", 长度可能不同
             updateValueWidth();
@@ -253,6 +307,7 @@ export function renderGlobalVars() {
             state.globalVars[idx].value = valInput.value;
             state.dirty = true;
             updateValueWidth();
+            autosizeValue();
         });
         valInput.addEventListener('keydown', e => {
             if (e.key === 'Escape') {
@@ -262,6 +317,8 @@ export function renderGlobalVars() {
                 updateValueWidth();
                 valInput.blur();
             } else if (e.key === 'Enter') {
+                // 统一提交语义：dict/list 的 textarea 也不支持 Enter 换行（多行内容靠粘贴）；
+                // 换行符会保留在 value 里并随内容撑高显示。
                 e.preventDefault();
                 state.globalVars[idx].value = valInput.value;
                 state.dirty = true;

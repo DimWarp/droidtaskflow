@@ -189,6 +189,90 @@ def input_text(text: str):
 
 
 # ═══════════════════════════════════════════════
+#  ADBKeyboard（中文输入支持）
+# ═══════════════════════════════════════════════
+#
+# `input text` 只支持 ASCII，中文输入需要 ADBKeyboard（com.android.adbkeyboard）：
+# 它是一个输入法 APK，通过 am broadcast ADB_INPUT_TEXT 接收任意文本（含 UTF-8）。
+
+_ADBKEYBOARD_PACKAGE = 'com.android.adbkeyboard'
+_ADBKEYBOARD_IME = 'com.android.adbkeyboard/.AdbIME'
+_ADBKEYBOARD_SOURCES = [
+    # 官方：GitHub 仓库（302 重定向到 release 直链，urllib 自动跟随）。
+    # 实测部分网络访问 GitHub 超时，故给较短超时，快速切到备用源。
+    ('https://github.com/senzhk/ADBKeyBoard/raw/master/ADBKeyboard.apk', 8),
+    # 备用：jsdelivr CDN（已实测 200 + APK 结构完整，可达性更好）
+    ('https://cdn.jsdelivr.net/gh/senzhk/ADBKeyBoard@master/ADBKeyboard.apk', 15),
+]
+
+
+def has_package(package: str) -> bool:
+    """检查设备是否已安装指定包（pm list packages 匹配）。"""
+    r = _adb(_serial, 'shell', 'pm', 'list', 'packages', package)
+    return package in r.stdout
+
+
+def enable_ime(ime_id: str) -> None:
+    """启用并切换输入法（ime enable + ime set）。"""
+    _adb(_serial, 'shell', 'ime', 'enable', ime_id)
+    _adb(_serial, 'shell', 'ime', 'set', ime_id)
+
+
+def download_file(url: str, dest: str, timeout: int = 15) -> None:
+    """下载文件到本地路径。用标准库 urllib——子进程环境无第三方依赖也能跑。"""
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        data = resp.read()
+    with open(dest, 'wb') as f:
+        f.write(data)
+
+
+def ensure_adbkeyboard() -> None:
+    """确保设备装有 ADBKeyboard 并已启用（支持中文输入）。
+
+    检查 com.android.adbkeyboard：未安装则按源列表逐个下载（超时/失败换下一个源），
+    adb install 安装，ime enable + ime set 启用切换。已安装也幂等地重新启用
+    （避免系统重置了输入法选择）。
+    """
+    if has_package(_ADBKEYBOARD_PACKAGE):
+        enable_ime(_ADBKEYBOARD_IME)
+        return
+    import os
+    # 下载到脚本同目录（bundle 解压目录，即子进程 cwd = main.py 所在目录），
+    # 安装完成后删除，不残留临时文件。
+    dest = os.path.join(os.getcwd(), 'ADBKeyboard.apk')
+    last_err = None
+    try:
+        for url, timeout in _ADBKEYBOARD_SOURCES:
+            try:
+                download_file(url, dest, timeout=timeout)
+                install_app(dest)
+                enable_ime(_ADBKEYBOARD_IME)
+                print(f"[adbkeyboard] installed from {url}")
+                return
+            except Exception as e:
+                last_err = e
+                print(f"[adbkeyboard] source failed: {url}: {e}")
+        raise RuntimeError(f"ADBKeyboard install failed: {last_err}")
+    finally:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+
+
+def input_text_unicode(text: str) -> None:
+    """通过 ADBKeyboard 广播输入任意文本（含中文）。
+
+    前置要求 ensure_adbkeyboard() 已装好并启用。adb 客户端把 args 拼成
+    设备端 shell 命令，特殊字符需转义：单引号包裹 + 内嵌单引号转义。
+    """
+    safe = text.replace("'", "'\\''")
+    _adb(_serial, 'shell', 'am', 'broadcast', '-a', 'ADB_INPUT_TEXT',
+         '--es', 'msg', f"'{safe}'")
+
+
+# ═══════════════════════════════════════════════
 #  电源管理（mysc_core）
 # ═══════════════════════════════════════════════
 #
